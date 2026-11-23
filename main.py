@@ -581,7 +581,7 @@ async def pay(ctx, member: discord.Member, amount: int):
     )
 
 
-@bot.command(aliases=["lb"])
+@bot.command()
 async def leaderboard(ctx):
     rows = db_fetchall(
         """
