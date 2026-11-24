@@ -3,18 +3,17 @@ import discord
 from discord.ext import commands
 import os
 import random
-import asyncio
 import sqlite3
 import time
+import asyncio
 import datetime
 import re
 
-# =====================================
-# VEXORA CONFIG
-# =====================================
+# ==========================================
+# VEXORA CONFIGURATION
+# ==========================================
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 OWNER_ID = 1495419933943922920
 
 SUPPORT_SERVER = "https://discord.gg/ZBaRByVFBC"
@@ -26,7 +25,6 @@ intents.message_content = True
 intents.members = True
 intents.invites = True
 intents.reactions = True
-intents.presences = True
 
 bot = commands.Bot(
     command_prefix=PREFIXES,
@@ -35,81 +33,47 @@ bot = commands.Bot(
     case_insensitive=True
 )
 
-# =====================================
-# EMBED SYSTEM
-# =====================================
+COLOR = discord.Color.from_rgb(175, 175, 175)
 
-VEX_COLOR = discord.Color.from_rgb(175, 175, 175)
-
-def vex_embed(title, description=None):
-    embed = discord.Embed(
+def embed(title, description=None):
+    e = discord.Embed(
         title=title,
         description=description,
-        color=VEX_COLOR
+        color=COLOR
     )
-    embed.set_footer(
+    e.set_footer(
         text="VEXORA • One Bot. Endless Possibilities."
     )
-    return embed
+    return e
 
-async def send_success(ctx, message):
-    await ctx.send(embed=vex_embed(
-        "SUCCESS",
-        f"✅ {message}"
-    ))
+async def success(ctx, message):
+    await ctx.send(embed=embed("SUCCESS", "✅ " + message))
 
-async def send_error(ctx, message):
-    await ctx.send(embed=vex_embed(
-        "ERROR",
-        f"❌ {message}"
-    ))
+async def error(ctx, message):
+    await ctx.send(embed=embed("ERROR", "❌ " + message))
 
-async def send_info(ctx, message):
-    await ctx.send(embed=vex_embed(
-        "VEXORA",
-        message
-    ))
+async def info(ctx, message):
+    await ctx.send(embed=embed("VEXORA", message))
 
-# =====================================
-# PERMISSION CHECKS
-# =====================================
 
-def is_bot_owner():
-    async def predicate(ctx):
-        return ctx.author.id == OWNER_ID
-    return commands.check(predicate)
-
-def is_staff():
-    async def predicate(ctx):
-        return (
-            ctx.author.id == OWNER_ID
-            or ctx.author.guild_permissions.manage_messages
-            or ctx.author.guild_permissions.administrator
-        )
-    return commands.check(predicate)
-
-# =====================================
+# ==========================================
 # DATABASE
-# =====================================
+# ==========================================
 
 db = sqlite3.connect("vexora.db")
 db.row_factory = sqlite3.Row
 
-def db_execute(query, params=()):
-    cursor = db.cursor()
-    cursor.execute(query, params)
+def execute(query, params=()):
+    cur = db.cursor()
+    cur.execute(query, params)
     db.commit()
-    return cursor
+    return cur
 
-def db_fetchone(query, params=()):
-    return db_execute(query, params).fetchone()
+def fetchone(query, params=()):
+    return execute(query, params).fetchone()
 
-def db_fetchall(query, params=()):
-    return db_execute(query, params).fetchall()
-
-# =====================================
-# DATABASE TABLES
-# =====================================
+def fetchall(query, params=()):
+    return execute(query, params).fetchall()
 
 db.executescript("""
 CREATE TABLE IF NOT EXISTS warnings (
@@ -123,14 +87,6 @@ CREATE TABLE IF NOT EXISTS warnings (
 CREATE TABLE IF NOT EXISTS premium (
     guild_id INTEGER PRIMARY KEY,
     expires INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS custom_commands (
-    guild_id INTEGER,
-    name TEXT,
-    response TEXT,
-    created_by INTEGER,
-    PRIMARY KEY (guild_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS economy (
@@ -154,89 +110,30 @@ CREATE TABLE IF NOT EXISTS levels (
     level INTEGER DEFAULT 0,
     PRIMARY KEY (guild_id, user_id)
 );
-
-CREATE TABLE IF NOT EXISTS giveaways (
-    message_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    channel_id INTEGER,
-    prize TEXT,
-    winners INTEGER,
-    end_time INTEGER,
-    host_id INTEGER,
-    ended INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS reaction_roles (
-    guild_id INTEGER,
-    message_id INTEGER,
-    emoji TEXT,
-    role_id INTEGER,
-    PRIMARY KEY (message_id, emoji)
-);
-
-CREATE TABLE IF NOT EXISTS invites (
-    guild_id INTEGER,
-    user_id INTEGER,
-    inviter_id INTEGER,
-    uses INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS confessions (
-    guild_id INTEGER PRIMARY KEY,
-    channel_id INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS suggestions (
-    guild_id INTEGER PRIMARY KEY,
-    channel_id INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS server_settings (
-    guild_id INTEGER PRIMARY KEY,
-    ticket_category INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS tickets (
-    channel_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    user_id INTEGER,
-    claimed_by INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS snipes (
-    channel_id INTEGER PRIMARY KEY,
-    author_id INTEGER,
-    content TEXT,
-    deleted_at INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS afk (
-    user_id INTEGER PRIMARY KEY,
-    reason TEXT
-);
-
-CREATE TABLE IF NOT EXISTS ftr_scores (
-    guild_id INTEGER,
-    user_id INTEGER,
-    wins INTEGER DEFAULT 0,
-    PRIMARY KEY (guild_id, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS polls (
-    message_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    channel_id INTEGER
-);
 """)
-
 db.commit()
 
-# =====================================
-# PREMIUM CHECK
-# =====================================
+
+# ==========================================
+# PERMISSION CHECKS
+# ==========================================
+
+def owner_only():
+    async def predicate(ctx):
+        return ctx.author.id == OWNER_ID
+    return commands.check(predicate)
+
+def staff_only():
+    async def predicate(ctx):
+        return (
+            ctx.author.id == OWNER_ID
+            or ctx.author.guild_permissions.manage_messages
+            or ctx.author.guild_permissions.administrator
+        )
+    return commands.check(predicate)
 
 async def is_premium(guild_id):
-    row = db_fetchone(
+    row = fetchone(
         "SELECT expires FROM premium WHERE guild_id=?",
         (guild_id,)
     )
@@ -246,11 +143,11 @@ async def is_premium(guild_id):
 
     expires = row["expires"]
 
-    if not expires:
+    if expires == 0:
         return True
 
-    if int(expires) <= int(time.time()):
-        db_execute(
+    if expires <= int(time.time()):
+        execute(
             "DELETE FROM premium WHERE guild_id=?",
             (guild_id,)
         )
@@ -258,9 +155,25 @@ async def is_premium(guild_id):
 
     return True
 
-# =====================================
-# BOT READY
-# =====================================
+def get_balance(user_id):
+    row = fetchone(
+        "SELECT balance FROM economy WHERE user_id=?",
+        (user_id,)
+    )
+
+    if not row:
+        execute(
+            "INSERT INTO economy (user_id, balance) VALUES (?, 0)",
+            (user_id,)
+        )
+        return 0
+
+    return row["balance"]
+
+
+# ==========================================
+# EVENTS
+# ==========================================
 
 @bot.event
 async def on_ready():
@@ -270,286 +183,379 @@ async def on_ready():
     print(f"SERVERS: {len(bot.guilds)}")
     print("================================")
 
-# =====================================
-# ERROR HANDLER
-# =====================================
 
 @bot.event
-async def on_command_error(ctx, error):
-
-    if isinstance(error, commands.CommandNotFound):
+async def on_command_error(ctx, err):
+    if isinstance(err, commands.CommandNotFound):
         return
 
-    if isinstance(error, commands.MissingRequiredArgument):
-        return await send_error(
+    if isinstance(err, commands.MissingRequiredArgument):
+        return await error(
             ctx,
-            f"Missing argument: `{error.param.name}`"
+            f"Missing argument: `{err.param.name}`"
         )
 
-    if isinstance(error, commands.MissingPermissions):
-        return await send_error(
+    if isinstance(err, commands.MissingPermissions):
+        return await error(
             ctx,
             "You don't have the required permissions."
         )
 
-    if isinstance(error, commands.NotOwner):
-        return await send_error(
+    if isinstance(err, commands.NotOwner):
+        return await error(
             ctx,
             "Only the bot owner can use this command."
         )
 
-    if isinstance(error, commands.CheckFailure):
-        return await send_error(
+    if isinstance(err, commands.CheckFailure):
+        return await error(ctx, "You cannot use this command.")
+
+    if isinstance(err, commands.CommandOnCooldown):
+        return await error(
             ctx,
-            "You cannot use this command."
+            f"Try again in {err.retry_after:.1f} seconds."
         )
 
-    print("ERROR:", repr(error))
+    print("COMMAND ERROR:", repr(err))
+    await error(ctx, "Something went wrong. Check Railway logs.")
 
-    await send_error(
-        ctx,
-        "An unexpected error occurred. Check Railway logs."
-    )
 
-# =====================================
+# ==========================================
 # GENERAL COMMANDS
-# =====================================
+# ==========================================
 
 @bot.command()
 async def ping(ctx):
     ms = round(bot.latency * 1000)
-    await ctx.send(embed=vex_embed(
-        "🏓 PONG!",
-        f"Latency: `{ms}ms`"
-    ))
-
+    await ctx.send(embed=embed("PONG", f"🏓 `{ms}ms`"))
 
 @bot.command()
 async def botinfo(ctx):
-    members = sum(g.member_count or 0 for g in bot.guilds)
-
-    embed = vex_embed(
-        "🤖 VEXORA INFORMATION",
-        f"""
-**Name:** {bot.user}
-**Servers:** {len(bot.guilds)}
-**Members:** {members}
-**Latency:** {round(bot.latency * 1000)}ms
-**Version:** 1.0
-"""
+    e = embed(
+        "VEXORA INFORMATION",
+        "One Bot. Endless Possibilities."
     )
-    await ctx.send(embed=embed)
-
+    e.add_field(name="Servers", value=len(bot.guilds))
+    e.add_field(name="Users", value=len(bot.users))
+    e.add_field(name="Latency", value=f"{round(bot.latency * 1000)}ms")
+    await ctx.send(embed=e)
 
 @bot.command()
-@commands.guild_only()
 async def serverinfo(ctx):
-    guild = ctx.guild
-
-    embed = vex_embed(
-        f"🏠 {guild.name}",
-        f"""
-**Owner:** {guild.owner}
-**Members:** {guild.member_count}
-**Channels:** {len(guild.channels)}
-**Roles:** {len(guild.roles)}
-**Created:** <t:{int(guild.created_at.timestamp())}:D>
-"""
-    )
-
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-
-    await ctx.send(embed=embed)
-
+    g = ctx.guild
+    e = embed("SERVER INFORMATION")
+    e.add_field(name="Name", value=g.name)
+    e.add_field(name="Members", value=g.member_count)
+    e.add_field(name="Owner", value=g.owner.mention if g.owner else "Unknown")
+    e.add_field(name="Created", value=g.created_at.strftime("%d %b %Y"))
+    if g.icon:
+        e.set_thumbnail(url=g.icon.url)
+    await ctx.send(embed=e)
 
 @bot.command()
-@commands.guild_only()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
-
-    joined = (
-        f"<t:{int(member.joined_at.timestamp())}:D>"
-        if member.joined_at else "Unknown"
-    )
-
-    embed = vex_embed(
-        f"👤 {member}",
-        f"""
-**ID:** `{member.id}`
-**Joined:** {joined}
-**Created:** <t:{int(member.created_at.timestamp())}:D>
-**Top Role:** {member.top_role.mention}
-"""
-    )
-
-    embed.set_thumbnail(url=member.display_avatar.url)
-    await ctx.send(embed=embed)
-
+    e = embed("USER INFORMATION")
+    e.add_field(name="Username", value=str(member))
+    e.add_field(name="ID", value=member.id)
+    e.add_field(name="Joined", value=member.joined_at.strftime("%d %b %Y") if member.joined_at else "Unknown")
+    e.add_field(name="Created", value=member.created_at.strftime("%d %b %Y"))
+    e.set_thumbnail(url=member.display_avatar.url)
+    await ctx.send(embed=e)
 
 @bot.command()
 async def avatar(ctx, member: discord.Member = None):
     member = member or ctx.author
+    e = embed(f"{member.display_name}'s Avatar")
+    e.set_image(url=member.display_avatar.url)
+    await ctx.send(embed=e)
 
-    embed = vex_embed(
-        f"🖼️ {member.display_name}'s Avatar",
-        f"[Open Avatar]({member.display_avatar.url})"
-    )
-    embed.set_image(url=member.display_avatar.url)
-    await ctx.send(embed=embed)
-
-# =====================================
-# VEXORA ECONOMY
-# =====================================
-
-def get_balance(user_id):
-    row = db_fetchone(
-        "SELECT balance FROM economy WHERE user_id=?",
-        (user_id,)
-    )
-
-    if not row:
-        db_execute(
-            "INSERT INTO economy (user_id, balance) VALUES (?, 0)",
-            (user_id,)
+@bot.command()
+async def support(ctx):
+    await ctx.send(
+        embed=embed(
+            "VEXORA SUPPORT",
+            f"[Join our support server]({SUPPORT_SERVER})"
         )
-        return 0
+    )
 
-    return row["balance"]
 
+# ==========================================
+# MODERATION
+# ==========================================
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.ban(reason=reason)
+    await success(ctx, f"{member} has been banned.\nReason: {reason}")
+
+@bot.command()
+@commands.has_permissions(kick_members=True)
+async def modkick(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.kick(reason=reason)
+    await success(ctx, f"{member} has been kicked.\nReason: {reason}")
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, user_id: int):
+    user = await bot.fetch_user(user_id)
+    await ctx.guild.unban(user)
+    await success(ctx, f"Unbanned {user}.")
+
+@bot.command()
+@commands.has_permissions(moderate_members=True)
+async def timeout(ctx, member: discord.Member, minutes: int, *, reason="No reason provided"):
+    if minutes < 1 or minutes > 40320:
+        return await error(ctx, "Choose between 1 and 40320 minutes.")
+
+    await member.timeout(
+        datetime.timedelta(minutes=minutes),
+        reason=reason
+    )
+    await success(ctx, f"{member.mention} timed out for {minutes} minutes.")
+
+@bot.command()
+@commands.has_permissions(moderate_members=True)
+async def untimeout(ctx, member: discord.Member):
+    await member.timeout(None)
+    await success(ctx, f"Timeout removed for {member.mention}.")
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def purge(ctx, amount: int):
+    if amount < 1 or amount > 100:
+        return await error(ctx, "Choose between 1 and 100 messages.")
+
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    msg = await ctx.send(
+        embed=embed("PURGED", f"Deleted `{len(deleted) - 1}` messages.")
+    )
+    await asyncio.sleep(3)
+    await msg.delete()
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def lock(ctx):
+    await ctx.channel.set_permissions(
+        ctx.guild.default_role,
+        send_messages=False
+    )
+    await success(ctx, "Channel locked.")
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def unlock(ctx):
+    await ctx.channel.set_permissions(
+        ctx.guild.default_role,
+        send_messages=True
+    )
+    await success(ctx, "Channel unlocked.")
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def slowmode(ctx, seconds: int):
+    if seconds < 0 or seconds > 21600:
+        return await error(ctx, "Choose 0–21600 seconds.")
+
+    await ctx.channel.edit(slowmode_delay=seconds)
+    await success(ctx, f"Slowmode set to {seconds} seconds.")
+
+
+# ==========================================
+# WARNINGS
+# ==========================================
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def warn(ctx, member: discord.Member, *, reason="No reason provided"):
+    execute(
+        "INSERT INTO warnings (guild_id,user_id,moderator_id,reason) VALUES (?,?,?,?)",
+        (ctx.guild.id, member.id, ctx.author.id, reason)
+    )
+    await success(ctx, f"{member.mention} has been warned.\nReason: {reason}")
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def warnings(ctx, member: discord.Member):
+    rows = fetchall(
+        "SELECT reason, moderator_id FROM warnings WHERE guild_id=? AND user_id=?",
+        (ctx.guild.id, member.id)
+    )
+
+    e = embed(f"WARNINGS: {member}")
+    if not rows:
+        e.description = "No warnings found."
+    else:
+        for i, row in enumerate(rows, 1):
+            e.add_field(
+                name=f"Warning {i}",
+                value=f"{row['reason']}\nModerator ID: {row['moderator_id']}",
+                inline=False
+            )
+    await ctx.send(embed=e)
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def clearwarns(ctx, member: discord.Member):
+    execute(
+        "DELETE FROM warnings WHERE guild_id=? AND user_id=?",
+        (ctx.guild.id, member.id)
+    )
+    await success(ctx, f"Cleared warnings for {member}.")
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def staff(ctx):
+    members = [
+        m for m in ctx.guild.members
+        if m.guild_permissions.manage_messages
+        or m.guild_permissions.administrator
+    ]
+
+    e = embed("SERVER STAFF")
+    e.description = "\n".join(m.mention for m in members[:50]) or "No staff found."
+    await ctx.send(embed=e)
+
+
+# ==========================================
+# PREMIUM MANAGEMENT
+# ==========================================
+
+@bot.group(invoke_without_command=True)
+async def premium(ctx):
+    active = await is_premium(ctx.guild.id)
+    await ctx.send(
+        embed=embed(
+            "PREMIUM STATUS",
+            "⭐ Premium is active." if active
+            else "Premium is not active on this server."
+        )
+    )
+
+@premium.command(name="add")
+@owner_only()
+async def premium_add(ctx, guild_id: int, days: int = 0):
+    if days < 0:
+        return await error(ctx, "Days cannot be negative.")
+
+    expires = 0 if days == 0 else int(time.time()) + days * 86400
+
+    execute(
+        "INSERT OR REPLACE INTO premium (guild_id,expires) VALUES (?,?)",
+        (guild_id, expires)
+    )
+    await success(
+        ctx,
+        f"Premium granted to server `{guild_id}`."
+        + (" Lifetime." if days == 0 else f" For {days} days.")
+    )
+
+@premium.command(name="remove")
+@owner_only()
+async def premium_remove(ctx, guild_id: int):
+    execute("DELETE FROM premium WHERE guild_id=?", (guild_id,))
+    await success(ctx, f"Premium removed from `{guild_id}`.")
+
+@premium.command(name="check")
+@owner_only()
+async def premium_check(ctx, guild_id: int):
+    active = await is_premium(guild_id)
+    await info(ctx, f"Server `{guild_id}` premium: `{active}`")
+
+@premium.command(name="list")
+@owner_only()
+async def premium_list(ctx):
+    rows = fetchall("SELECT guild_id, expires FROM premium")
+
+    e = embed("PREMIUM SERVERS")
+    if not rows:
+        e.description = "No premium servers."
+    else:
+        for row in rows:
+            expiry = "Lifetime" if row["expires"] == 0 else f"<t:{row['expires']}:R>"
+            e.add_field(
+                name=str(row["guild_id"]),
+                value=expiry,
+                inline=False
+            )
+    await ctx.send(embed=e)
+
+
+# ==========================================
+# ECONOMY
+# ==========================================
 
 @bot.command()
 async def balance(ctx, member: discord.Member = None):
     member = member or ctx.author
     amount = get_balance(member.id)
-
-    await ctx.send(embed=vex_embed(
-        "💰 VEX BALANCE",
-        f"**{member.display_name}** has `{amount:,} VEX`."
-    ))
-
+    await ctx.send(
+        embed=embed("VEX BALANCE", f"{member.mention} has **{amount} VEX**.")
+    )
 
 @bot.command()
+@commands.cooldown(1, 86400, commands.BucketType.user)
 async def daily(ctx):
-    user_id = ctx.author.id
-    now = int(time.time())
-
-    row = db_fetchone(
-        "SELECT * FROM economy WHERE user_id=?",
-        (user_id,)
+    row = fetchone(
+        "SELECT daily FROM economy WHERE user_id=?",
+        (ctx.author.id,)
     )
+    get_balance(ctx.author.id)
 
-    if not row:
-        db_execute(
-            "INSERT INTO economy (user_id) VALUES (?)",
-            (user_id,)
-        )
-        row = db_fetchone(
-            "SELECT * FROM economy WHERE user_id=?",
-            (user_id,)
-        )
-
-    if row["daily"] and now - row["daily"] < 86400:
-        remaining = 86400 - (now - row["daily"])
-        return await send_error(
-            ctx, f"Daily reward available <t:{now + remaining}:R>."
-        )
-
-    reward = random.randint(100, 300)
-
-    db_execute(
-        """
-        UPDATE economy
-        SET balance=balance+?, daily=?
-        WHERE user_id=?
-        """,
-        (reward, now, user_id)
+    reward = 250
+    execute(
+        "UPDATE economy SET balance=balance+?, daily=? WHERE user_id=?",
+        (reward, int(time.time()), ctx.author.id)
     )
-
-    await send_success(ctx, f"You received `{reward} VEX`!")
-
+    await success(ctx, f"You collected **{reward} VEX** daily.")
 
 @bot.command()
+@commands.cooldown(1, 604800, commands.BucketType.user)
 async def weekly(ctx):
-    user_id = ctx.author.id
-    now = int(time.time())
-
-    row = db_fetchone(
-        "SELECT * FROM economy WHERE user_id=?",
-        (user_id,)
+    get_balance(ctx.author.id)
+    reward = 1000
+    execute(
+        "UPDATE economy SET balance=balance+?, weekly=? WHERE user_id=?",
+        (reward, int(time.time()), ctx.author.id)
     )
-
-    if not row:
-        db_execute(
-            "INSERT INTO economy (user_id) VALUES (?)",
-            (user_id,)
-        )
-        row = db_fetchone(
-            "SELECT * FROM economy WHERE user_id=?",
-            (user_id,)
-        )
-
-    if row["weekly"] and now - row["weekly"] < 604800:
-        remaining = 604800 - (now - row["weekly"])
-        return await send_error(
-            ctx, f"Weekly reward available <t:{now + remaining}:R>."
-        )
-
-    reward = random.randint(500, 1000)
-
-    db_execute(
-        """
-        UPDATE economy
-        SET balance=balance+?, weekly=?
-        WHERE user_id=?
-        """,
-        (reward, now, user_id)
-    )
-
-    await send_success(ctx, f"You received `{reward} VEX`!")
-
+    await success(ctx, f"You collected **{reward} VEX** weekly.")
 
 @bot.command()
+@commands.cooldown(1, 60, commands.BucketType.user)
 async def work(ctx):
-    reward = random.randint(50, 150)
+    reward = random.randint(30, 100)
     get_balance(ctx.author.id)
-
-    db_execute(
+    execute(
         "UPDATE economy SET balance=balance+? WHERE user_id=?",
         (reward, ctx.author.id)
     )
-
-    await send_success(ctx, f"You earned `{reward} VEX` from working!")
-
+    await success(ctx, f"You worked and earned **{reward} VEX**.")
 
 @bot.command()
+@commands.cooldown(1, 30, commands.BucketType.user)
 async def beg(ctx):
-    reward = random.randint(10, 50)
+    reward = random.randint(5, 30)
     get_balance(ctx.author.id)
-
-    db_execute(
+    execute(
         "UPDATE economy SET balance=balance+? WHERE user_id=?",
         (reward, ctx.author.id)
     )
-
-    await send_success(ctx, f"Someone gave you `{reward} VEX`!")
-
+    await success(ctx, f"Someone gave you **{reward} VEX**.")
 
 @bot.command()
 async def pay(ctx, member: discord.Member, amount: int):
-    if member.bot or member.id == ctx.author.id:
-        return await send_error(ctx, "Invalid recipient.")
-
     if amount <= 0:
-        return await send_error(ctx, "Amount must be positive.")
+        return await error(ctx, "Amount must be positive.")
+
+    if member.bot or member.id == ctx.author.id:
+        return await error(ctx, "Choose another member.")
 
     get_balance(ctx.author.id)
     get_balance(member.id)
 
-    # Atomic balance transfer
+    db.execute("BEGIN IMMEDIATE")
     try:
-        db.execute("BEGIN IMMEDIATE")
-
         sender = db.execute(
             "SELECT balance FROM economy WHERE user_id=?",
             (ctx.author.id,)
@@ -557,95 +563,64 @@ async def pay(ctx, member: discord.Member, amount: int):
 
         if sender["balance"] < amount:
             db.rollback()
-            return await send_error(ctx, "Not enough VEX.")
+            return await error(ctx, "You don't have enough VEX.")
 
         db.execute(
             "UPDATE economy SET balance=balance-? WHERE user_id=?",
             (amount, ctx.author.id)
         )
-
         db.execute(
             "UPDATE economy SET balance=balance+? WHERE user_id=?",
             (amount, member.id)
         )
-
         db.commit()
-
     except Exception:
         db.rollback()
         raise
 
-    await send_success(
-        ctx,
-        f"Transferred `{amount:,} VEX` to {member.mention}."
-    )
-
+    await success(ctx, f"Sent **{amount} VEX** to {member.mention}.")
 
 @bot.command()
 async def leaderboard(ctx):
-    rows = db_fetchall(
-        """
-        SELECT user_id, balance
-        FROM economy
-        ORDER BY balance DESC
-        LIMIT 10
-        """
+    rows = fetchall(
+        "SELECT user_id,balance FROM economy ORDER BY balance DESC LIMIT 10"
     )
 
-    if not rows:
-        return await send_info(ctx, "No economy data yet.")
+    e = embed("VEX LEADERBOARD")
+    e.description = "\n".join(
+        f"**{i}.** <@{r['user_id']}> — {r['balance']} VEX"
+        for i, r in enumerate(rows, 1)
+    ) or "No users yet."
 
-    lines = []
+    await ctx.send(embed=e)
 
-    for i, row in enumerate(rows, 1):
-        lines.append(
-            f"**{i}.** <@{row['user_id']}> — `{row['balance']:,} VEX`"
-        )
 
-    await ctx.send(embed=vex_embed(
-        "🏆 VEX LEADERBOARD",
-        "\n".join(lines)
-    ))
-
-# =====================================
-# MINI GAMES
-# =====================================
-
-@bot.command()
-async def flip(ctx):
-    result = random.choice(["Heads", "Tails"])
-
-    await ctx.send(embed=vex_embed(
-        "🪙 COIN FLIP",
-        f"Result: **{result}**"
-    ))
-
+# ==========================================
+# SIMPLE GAMES
+# ==========================================
 
 @bot.command()
 async def dice(ctx):
     result = random.randint(1, 6)
+    await ctx.send(embed=embed("DICE", f"🎲 You rolled **{result}**!"))
 
-    await ctx.send(embed=vex_embed(
-        "🎲 DICE ROLL",
-        f"You rolled **{result}**!"
-    ))
-
+@bot.command()
+async def flip(ctx):
+    result = random.choice(["Heads", "Tails"])
+    await ctx.send(embed=embed("COIN FLIP", f"🪙 **{result}**"))
 
 @bot.command()
 async def rps(ctx, choice: str):
-    choices = ["rock", "paper", "scissors"]
-
     choice = choice.lower()
+    options = ["rock", "paper", "scissors"]
 
-    if choice not in choices:
-        return await send_error(
-            ctx, "Choose rock, paper, or scissors."
-        )
+    if choice not in options:
+        return await error(ctx, "Choose rock, paper or scissors.")
 
-    bot_choice = random.choice(choices)
+    bot_choice = random.choice(options)
 
     if choice == bot_choice:
-        result = "It's a draw!"
+        result = "It's a tie!"
     elif (
         (choice == "rock" and bot_choice == "scissors")
         or (choice == "paper" and bot_choice == "rock")
@@ -653,202 +628,67 @@ async def rps(ctx, choice: str):
     ):
         result = "You win!"
     else:
-        result = "VEXORA wins!"
+        result = "I win!"
 
-    await ctx.send(embed=vex_embed(
-        "✂️ ROCK PAPER SCISSORS",
-        f"""
-**You:** {choice.title()}
-**VEXORA:** {bot_choice.title()}
-
-**Result:** {result}
-"""
-    ))
+    await ctx.send(
+        embed=embed(
+            "ROCK PAPER SCISSORS",
+            f"You: **{choice}**\nVEXORA: **{bot_choice}**\n\n{result}"
+        )
+    )
 
 
-# Guessing game: each user has their own active game
-guess_games = {}
-
+# ==========================================
+# REPUTATION
+# ==========================================
 
 @bot.command()
-async def guess(ctx, number: int = None):
-    user_id = ctx.author.id
-
-    if number is None:
-        guess_games[user_id] = random.randint(1, 20)
-        return await send_info(
-            ctx, "I'm thinking of a number from 1 to 20. Use `!guess <number>`."
-        )
-
-    if user_id not in guess_games:
-        return await send_error(ctx, "Start a game with `!guess` first.")
-
-    if not 1 <= number <= 20:
-        return await send_error(ctx, "Choose a number from 1 to 20.")
-
-    answer = guess_games[user_id]
-
-    if number == answer:
-        del guess_games[user_id]
-        await send_success(ctx, "Correct! You guessed it!")
-    elif number < answer:
-        await send_info(ctx, "Too low! Try again.")
-    else:
-        await send_info(ctx, "Too high! Try again.")
-
-
-@bot.command()
-async def trivia(ctx):
-    questions = [
-        ("What is the capital of Japan?", "tokyo"),
-        ("How many sides does a hexagon have?", "6"),
-        ("Which planet is known as the Red Planet?", "mars"),
-        ("What is 12 x 12?", "144"),
-        ("What is the largest ocean?", "pacific")
-    ]
-
-    question, answer = random.choice(questions)
-
-    await ctx.send(embed=vex_embed(
-        "🧠 TRIVIA",
-        f"{question}\n\nReply with your answer!"
-    ))
-
-    def check(message):
-        return (
-            message.author == ctx.author
-            and message.channel == ctx.channel
-        )
-
-    try:
-        response = await bot.wait_for(
-            "message",
-            timeout=25,
-            check=check
-        )
-
-        if response.content.lower().strip() == answer:
-            await send_success(ctx, "Correct answer!")
-        else:
-            await send_info(ctx, f"The correct answer was **{answer}**.")
-
-    except asyncio.TimeoutError:
-        await send_info(ctx, f"Time's up! Answer: **{answer}**.")
-
-# =====================================
-# REPUTATION SYSTEM
-# =====================================
-
-@bot.command()
-@commands.guild_only()
 async def rep(ctx, member: discord.Member):
     if member.bot or member.id == ctx.author.id:
-        return await send_error(ctx, "Invalid member.")
+        return await error(ctx, "You cannot give reputation to yourself or a bot.")
 
-    existing = db_fetchone(
-        """
-        SELECT reps FROM reputation
-        WHERE guild_id=? AND user_id=?
-        """,
+    execute(
+        "INSERT OR IGNORE INTO reputation (guild_id,user_id,reps) VALUES (?,?,0)",
         (ctx.guild.id, member.id)
     )
 
-    db_execute(
-        """
-        INSERT INTO reputation (guild_id, user_id, reps)
-        VALUES (?, ?, 1)
-        ON CONFLICT(guild_id, user_id)
-        DO UPDATE SET reps=reps+1
-        """,
+    execute(
+        "UPDATE reputation SET reps=reps+1 WHERE guild_id=? AND user_id=?",
         (ctx.guild.id, member.id)
     )
-
-    await send_success(ctx, f"Gave reputation to {member.mention}!")
-
+    await success(ctx, f"Gave reputation to {member.mention}.")
 
 @bot.command()
-@commands.guild_only()
 async def reps(ctx, member: discord.Member = None):
     member = member or ctx.author
 
-    row = db_fetchone(
-        """
-        SELECT reps FROM reputation
-        WHERE guild_id=? AND user_id=?
-        """,
+    row = fetchone(
+        "SELECT reps FROM reputation WHERE guild_id=? AND user_id=?",
         (ctx.guild.id, member.id)
     )
 
     amount = row["reps"] if row else 0
-
-    await ctx.send(embed=vex_embed(
-        "⭐ REPUTATION",
-        f"{member.mention} has `{amount}` reputation points."
-    ))
+    await info(ctx, f"{member.mention} has **{amount} reputation**.")
 
 
-@bot.command()
-@commands.guild_only()
-async def repboard(ctx):
-    rows = db_fetchall(
-        """
-        SELECT user_id, reps
-        FROM reputation
-        WHERE guild_id=?
-        ORDER BY reps DESC
-        LIMIT 10
-        """,
-        (ctx.guild.id,)
-    )
-
-    if not rows:
-        return await send_info(ctx, "No reputation data yet.")
-
-    lines = [
-        f"**{i}.** <@{row['user_id']}> — `{row['reps']} ⭐`"
-        for i, row in enumerate(rows, 1)
-    ]
-
-    await ctx.send(embed=vex_embed(
-        "⭐ REPUTATION LEADERBOARD",
-        "\n".join(lines)
-    ))
-
-# =====================================
-# LEVELING SYSTEM
-# =====================================
-
-level_cooldowns = {}
-
+# ==========================================
+# LEVEL SYSTEM
+# ==========================================
 
 @bot.listen("on_message")
-async def level_message(message):
+async def level_listener(message):
     if message.author.bot or not message.guild:
         return
 
-    now = time.time()
-    key = (message.guild.id, message.author.id)
-
-    if now - level_cooldowns.get(key, 0) < 60:
-        return
-
-    level_cooldowns[key] = now
-
-    row = db_fetchone(
-        """
-        SELECT xp, level FROM levels
-        WHERE guild_id=? AND user_id=?
-        """,
-        key
+    row = fetchone(
+        "SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
+        (message.guild.id, message.author.id)
     )
 
     if not row:
-        db_execute(
-            """
-            INSERT INTO levels (guild_id, user_id, xp, level)
-            VALUES (?, ?, 0, 0)
-            """,
-            key
+        execute(
+            "INSERT INTO levels (guild_id,user_id,xp,level) VALUES (?,?,0,0)",
+            (message.guild.id, message.author.id)
         )
         xp = 0
         level = 0
@@ -856,285 +696,178 @@ async def level_message(message):
         xp = row["xp"]
         level = row["level"]
 
-    xp += random.randint(10, 20)
+    xp += random.randint(5, 15)
+    needed = (level + 1) * 100
 
-    required = (level + 1) * 100
-
-    if xp >= required:
-        xp -= required
+    if xp >= needed:
+        xp -= needed
         level += 1
-
         await message.channel.send(
-            embed=vex_embed(
-                "🎉 LEVEL UP!",
+            embed=embed(
+                "LEVEL UP!",
                 f"{message.author.mention} reached level **{level}**!"
             )
         )
 
-    db_execute(
-        """
-        UPDATE levels
-        SET xp=?, level=?
-        WHERE guild_id=? AND user_id=?
-        """,
-        (xp, level, *key)
+    execute(
+        "UPDATE levels SET xp=?,level=? WHERE guild_id=? AND user_id=?",
+        (xp, level, message.guild.id, message.author.id)
     )
 
-
 @bot.command()
-@commands.guild_only()
 async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
 
-    row = db_fetchone(
-        """
-        SELECT xp, level FROM levels
-        WHERE guild_id=? AND user_id=?
-        """,
+    row = fetchone(
+        "SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
         (ctx.guild.id, member.id)
     )
 
     xp = row["xp"] if row else 0
     level = row["level"] if row else 0
 
-    required = (level + 1) * 100
-
-    await ctx.send(embed=vex_embed(
-        f"🏆 RANK • {member.display_name}",
-        f"""
-**Level:** `{level}`
-**XP:** `{xp}/{required}`
-**Remaining:** `{required - xp} XP`
-"""
-    ))
-
+    await ctx.send(
+        embed=embed(
+            "RANK CARD",
+            f"**{member.display_name}**\nLevel: `{level}`\nXP: `{xp}/{(level + 1) * 100}`"
+        )
+    )
 
 @bot.command()
-@commands.guild_only()
 async def level(ctx, member: discord.Member = None):
-    member = member or ctx.author
-
-    row = db_fetchone(
-        """
-        SELECT level FROM levels
-        WHERE guild_id=? AND user_id=?
-        """,
-        (ctx.guild.id, member.id)
-    )
-
-    amount = row["level"] if row else 0
-
-    await send_info(ctx, f"{member.mention} is level `{amount}`.")
-
-
-@bot.command()
-@commands.guild_only()
-async def levels(ctx):
-    rows = db_fetchall(
-        """
-        SELECT user_id, level, xp
-        FROM levels
-        WHERE guild_id=?
-        ORDER BY level DESC, xp DESC
-        LIMIT 10
-        """,
-        (ctx.guild.id,)
-    )
-
-    if not rows:
-        return await send_info(ctx, "No level data yet.")
-
-    lines = [
-        f"**{i}.** <@{r['user_id']}> — Level `{r['level']}`"
-        for i, r in enumerate(rows, 1)
-    ]
-
-    await ctx.send(embed=vex_embed(
-        "🏆 SERVER LEVELS",
-        "\n".join(lines)
-    ))
-
-# =====================================
+    await rank.callback(ctx, member)
+    
+# ==========================================
 # AFK SYSTEM
-# =====================================
+# ==========================================
+
+afk_users = {}
 
 @bot.command()
 async def afk(ctx, *, reason="AFK"):
-    db_execute(
-        """
-        INSERT INTO afk (user_id, reason)
-        VALUES (?, ?)
-        ON CONFLICT(user_id)
-        DO UPDATE SET reason=excluded.reason
-        """,
-        (ctx.author.id, reason)
-    )
-
-    await send_success(ctx, f"AFK enabled: **{reason}**")
-
+    afk_users[ctx.author.id] = reason
+    await success(ctx, f"You are now AFK: {reason}")
 
 @bot.listen("on_message")
-async def afk_message(message):
+async def afk_listener(message):
     if message.author.bot:
         return
 
-    row = db_fetchone(
-        "SELECT reason FROM afk WHERE user_id=?",
-        (message.author.id,)
-    )
-
-    if row:
-        db_execute(
-            "DELETE FROM afk WHERE user_id=?",
-            (message.author.id,)
-        )
-
-        await message.channel.send(
-            f"Welcome back {message.author.mention}! Your AFK status was removed."
-        )
-
-    for mentioned in message.mentions:
-        afk_user = db_fetchone(
-            "SELECT reason FROM afk WHERE user_id=?",
-            (mentioned.id,)
-        )
-
-        if afk_user:
+    if message.author.id in afk_users:
+        afk_users.pop(message.author.id, None)
+        try:
             await message.channel.send(
-                f"💤 {mentioned.display_name} is AFK: **{afk_user['reason']}**"
+                embed=embed("WELCOME BACK", f"{message.author.mention}, your AFK status was removed.")
+            )
+        except discord.HTTPException:
+            pass
+
+    for user in message.mentions:
+        if user.id in afk_users:
+            await message.channel.send(
+                embed=embed("AFK USER", f"{user.mention} is AFK: {afk_users[user.id]}")
             )
 
-# =====================================
+
+# ==========================================
 # CONFESSIONS
-# =====================================
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS confessions (
+    guild_id INTEGER PRIMARY KEY,
+    channel_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS suggestions (
+    guild_id INTEGER PRIMARY KEY,
+    channel_id INTEGER
+);
+""")
+db.commit()
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def confesssetup(ctx, channel: discord.TextChannel):
-    db_execute(
-        """
-        INSERT INTO confessions (guild_id, channel_id)
-        VALUES (?, ?)
-        ON CONFLICT(guild_id)
-        DO UPDATE SET channel_id=excluded.channel_id
-        """,
+    execute(
+        "INSERT OR REPLACE INTO confessions VALUES (?,?)",
         (ctx.guild.id, channel.id)
     )
+    await success(ctx, f"Confessions channel set to {channel.mention}.")
 
-    await send_success(ctx, f"Confessions channel set to {channel.mention}.")
+@bot.command()
+async def confess(ctx, *, message):
+    row = fetchone(
+        "SELECT channel_id FROM confessions WHERE guild_id=?",
+        (ctx.guild.id,)
+    )
+    if not row:
+        return await error(ctx, "Confessions are not configured.")
 
+    channel = ctx.guild.get_channel(row["channel_id"])
+    if not channel:
+        return await error(ctx, "Configured channel no longer exists.")
+
+    e = embed("ANONYMOUS CONFESSION", message)
+    e.add_field(name="Server", value=ctx.guild.name)
+    await channel.send(embed=e)
+    await success(ctx, "Your confession was submitted.")
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def confessionsoff(ctx):
-    db_execute(
-        "DELETE FROM confessions WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-
-    await send_success(ctx, "Confessions disabled.")
+    execute("DELETE FROM confessions WHERE guild_id=?", (ctx.guild.id,))
+    await success(ctx, "Confessions disabled.")
 
 
-@bot.command()
-@commands.guild_only()
-async def confess(ctx, *, message: str):
-    row = db_fetchone(
-        "SELECT channel_id FROM confessions WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-
-    if not row:
-        return await send_error(ctx, "Confessions are not configured.")
-
-    channel = ctx.guild.get_channel(row["channel_id"])
-
-    if not channel:
-        return await send_error(ctx, "Confession channel not found.")
-
-    if len(message) > 1500:
-        return await send_error(ctx, "Confession is too long.")
-
-    embed = vex_embed("🤍 ANONYMOUS CONFESSION", message)
-
-    await channel.send(embed=embed)
-    await send_success(ctx, "Your confession was sent.")
-
-# =====================================
+# ==========================================
 # SUGGESTIONS
-# =====================================
+# ==========================================
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def suggestsetup(ctx, channel: discord.TextChannel):
-    db_execute(
-        """
-        INSERT INTO suggestions (guild_id, channel_id)
-        VALUES (?, ?)
-        ON CONFLICT(guild_id)
-        DO UPDATE SET channel_id=excluded.channel_id
-        """,
+    execute(
+        "INSERT OR REPLACE INTO suggestions VALUES (?,?)",
         (ctx.guild.id, channel.id)
     )
-
-    await send_success(ctx, f"Suggestions channel set to {channel.mention}.")
-
+    await success(ctx, f"Suggestions channel set to {channel.mention}.")
 
 @bot.command()
-@commands.guild_only()
-async def suggest(ctx, *, suggestion: str):
-    row = db_fetchone(
+async def suggest(ctx, *, message):
+    row = fetchone(
         "SELECT channel_id FROM suggestions WHERE guild_id=?",
         (ctx.guild.id,)
     )
-
     if not row:
-        return await send_error(ctx, "Suggestions are not configured.")
+        return await error(ctx, "Suggestions are not configured.")
 
     channel = ctx.guild.get_channel(row["channel_id"])
-
     if not channel:
-        return await send_error(ctx, "Suggestion channel not found.")
+        return await error(ctx, "Suggestion channel not found.")
 
-    if len(suggestion) > 1500:
-        return await send_error(ctx, "Suggestion is too long.")
-
-    embed = vex_embed("💡 NEW SUGGESTION", suggestion)
-    embed.add_field(
-        name="Suggested by",
-        value=ctx.author.mention,
-        inline=False
-    )
-
-    msg = await channel.send(embed=embed)
-
+    e = embed("NEW SUGGESTION", message)
+    e.add_field(name="Suggested by", value=ctx.author.mention)
+    msg = await channel.send(embed=e)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
+    await success(ctx, "Suggestion submitted.")
 
-    await send_success(ctx, "Your suggestion was submitted!")
 
-# =====================================
+# ==========================================
 # POLLS
-# =====================================
+# ==========================================
 
 @bot.command()
-@commands.guild_only()
-async def poll(ctx, *, question: str):
-    if len(question) > 1500:
-        return await send_error(ctx, "Poll question is too long.")
-
-    embed = vex_embed(
-        "📊 SERVER POLL",
-        f"**{question}**\n\n👍 = Yes\n👎 = No"
-    )
-
-    msg = await ctx.send(embed=embed)
-
+async def poll(ctx, *, question):
+    e = embed("📊 POLL", question)
+    msg = await ctx.send(embed=e)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
 
-# =====================================
+
+# ==========================================
 # ANIME FUN COMMANDS
-# =====================================
+# ==========================================
 
 ANIME_GIFS = {
     "kiss": [
@@ -1151,586 +884,345 @@ ANIME_GIFS = {
     ]
 }
 
-
-async def anime_action(ctx, action, member):
-    if member.bot and member.id == bot.user.id:
-        return await send_error(ctx, "You cannot use that on me!")
-
+async def anime_action(ctx, member, action):
     gif = random.choice(ANIME_GIFS[action])
-
-    embed = vex_embed(
-        f"🎬 ANIME {action.upper()}",
-        f"{ctx.author.mention} **{action}s** {member.mention}!\n\n"
-        f"[View GIF]({gif})"
+    e = embed(
+        f"{action.upper()}!",
+        f"{ctx.author.mention} {action}s {member.mention}!\n[View anime GIF]({gif})"
     )
-
-    await ctx.send(embed=embed)
-
+    await ctx.send(embed=e)
 
 @bot.command()
 async def kiss(ctx, member: discord.Member):
-    await anime_action(ctx, "kiss", member)
-
+    await anime_action(ctx, member, "kiss")
 
 @bot.command()
 async def punch(ctx, member: discord.Member):
-    await anime_action(ctx, "punch", member)
-
+    await anime_action(ctx, member, "punch")
 
 @bot.command()
 async def kick(ctx, member: discord.Member):
-    await anime_action(ctx, "kick", member)
+    await anime_action(ctx, member, "kick")
 
-# =====================================
-# GIVEAWAY SYSTEM
-# =====================================
+
+# ==========================================
+# GIVEAWAYS
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS giveaways (
+    message_id INTEGER PRIMARY KEY,
+    guild_id INTEGER,
+    channel_id INTEGER,
+    prize TEXT,
+    winners INTEGER,
+    end_time INTEGER,
+    ended INTEGER DEFAULT 0
+);
+""")
+db.commit()
 
 giveaway_tasks = {}
 
-
 def parse_duration(value):
     match = re.fullmatch(r"(\d+)([smhd])", value.lower())
-
     if not match:
         return None
 
     amount = int(match.group(1))
     unit = match.group(2)
 
-    multipliers = {
+    seconds = amount * {
         "s": 1,
         "m": 60,
         "h": 3600,
         "d": 86400
-    }
-
-    seconds = amount * multipliers[unit]
+    }[unit]
 
     if seconds < 10 or seconds > 2592000:
         return None
 
     return seconds
 
-
-async def finish_giveaway(message_id, cancelled=False):
-    row = db_fetchone(
-        "SELECT * FROM giveaways WHERE message_id=?",
+async def finish_giveaway(message_id):
+    row = fetchone(
+        "SELECT * FROM giveaways WHERE message_id=? AND ended=0",
         (message_id,)
     )
-
-    if not row or row["ended"]:
+    if not row:
         return
 
     channel = bot.get_channel(row["channel_id"])
-
     if not channel:
         return
 
     try:
-        message = await channel.fetch_message(message_id)
-    except discord.NotFound:
-        db_execute(
-            "UPDATE giveaways SET ended=1 WHERE message_id=?",
-            (message_id,)
-        )
-        return
+        msg = await channel.fetch_message(message_id)
+        users = [
+            user async for user in msg.reactions[0].users()
+            if not user.bot
+        ]
 
-    db_execute(
+        winners = random.sample(
+            users,
+            min(len(users), row["winners"])
+        ) if users else []
+
+        winner_text = ", ".join(w.mention for w in winners) if winners else "No valid entries."
+
+        e = embed("GIVEAWAY ENDED", f"Prize: **{row['prize']}**\nWinners: {winner_text}")
+        await channel.send(embed=e)
+
+    except discord.HTTPException:
+        pass
+
+    execute(
         "UPDATE giveaways SET ended=1 WHERE message_id=?",
         (message_id,)
     )
 
-    task = giveaway_tasks.pop(message_id, None)
-
-    if task and task != asyncio.current_task():
-        task.cancel()
-
-    if cancelled:
-        embed = vex_embed(
-            "❌ GIVEAWAY CANCELLED",
-            f"**Prize:** {row['prize']}"
-        )
-        return await message.reply(embed=embed)
-
-    reaction = discord.utils.get(
-        message.reactions,
-        emoji="🎉"
-    )
-
-    if not reaction:
-        return await message.reply(
-            embed=vex_embed("GIVEAWAY ENDED", "No entries found.")
-        )
-
-    users = [
-        user async for user in reaction.users()
-        if not user.bot
-    ]
-
-    if not users:
-        return await message.reply(
-            embed=vex_embed("GIVEAWAY ENDED", "No valid entries.")
-        )
-
-    winners = random.sample(
-        users,
-        min(row["winners"], len(users))
-    )
-
-    mentions = ", ".join(user.mention for user in winners)
-
-    await message.reply(
-        embed=vex_embed(
-            "🎉 GIVEAWAY ENDED",
-            f"**Prize:** {row['prize']}\n"
-            f"**Winner(s):** {mentions}"
-        )
-    )
-
-
 async def giveaway_timer(message_id, end_time):
-    try:
-        await asyncio.sleep(max(0, end_time - int(time.time())))
-        await finish_giveaway(message_id)
-    except asyncio.CancelledError:
-        pass
-
+    await asyncio.sleep(max(0, end_time - int(time.time())))
+    await finish_giveaway(message_id)
+    giveaway_tasks.pop(message_id, None)
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
-async def gstart(ctx, duration: str, winners: int, *, prize: str):
+async def gstart(ctx, duration: str, winners: int, *, prize):
     seconds = parse_duration(duration)
 
-    if seconds is None:
-        return await send_error(
-            ctx, "Use a duration like `10m`, `2h`, or `1d`."
-        )
+    if not seconds:
+        return await error(ctx, "Use 10s, 5m, 2h or 1d. Maximum 30 days.")
 
-    if not 1 <= winners <= 20:
-        return await send_error(ctx, "Winners must be between 1 and 20.")
-
-    if len(prize) > 200:
-        return await send_error(ctx, "Prize name is too long.")
+    if winners < 1 or winners > 20:
+        return await error(ctx, "Choose 1–20 winners.")
 
     end_time = int(time.time()) + seconds
 
-    embed = vex_embed(
-        "🎉 VEXORA GIVEAWAY",
-        f"""
-**Prize:** {prize}
-**Winners:** {winners}
-**Hosted by:** {ctx.author.mention}
-**Ends:** <t:{end_time}:R>
-
-React with 🎉 to enter!
-"""
+    e = embed(
+        "🎉 GIVEAWAY",
+        f"Prize: **{prize}**\nWinners: `{winners}`\nEnds: <t:{end_time}:R>\nReact with 🎉 to enter!"
     )
 
-    message = await ctx.send(embed=embed)
-    await message.add_reaction("🎉")
+    msg = await ctx.send(embed=e)
+    await msg.add_reaction("🎉")
 
-    db_execute(
-        """
-        INSERT INTO giveaways
-        (message_id, guild_id, channel_id, prize, winners, end_time, host_id, ended)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-        """,
-        (
-            message.id,
-            ctx.guild.id,
-            ctx.channel.id,
-            prize,
-            winners,
-            end_time,
-            ctx.author.id
-        )
+    execute(
+        "INSERT INTO giveaways (message_id,guild_id,channel_id,prize,winners,end_time) VALUES (?,?,?,?,?,?)",
+        (msg.id, ctx.guild.id, ctx.channel.id, prize, winners, end_time)
     )
 
-    giveaway_tasks[message.id] = asyncio.create_task(
-        giveaway_timer(message.id, end_time)
+    giveaway_tasks[msg.id] = asyncio.create_task(
+        giveaway_timer(msg.id, end_time)
     )
-
-
-async def get_latest_giveaway(ctx):
-    return db_fetchone(
-        """
-        SELECT * FROM giveaways
-        WHERE guild_id=? AND channel_id=? AND ended=0
-        ORDER BY end_time DESC
-        LIMIT 1
-        """,
-        (ctx.guild.id, ctx.channel.id)
-    )
-
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
-async def gend(ctx):
-    row = await get_latest_giveaway(ctx)
-
-    if not row:
-        return await send_error(ctx, "No active giveaway in this channel.")
-
-    await finish_giveaway(row["message_id"])
-
+async def gend(ctx, message_id: int):
+    task = giveaway_tasks.pop(message_id, None)
+    if task:
+        task.cancel()
+    await finish_giveaway(message_id)
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
-async def gcancel(ctx):
-    row = await get_latest_giveaway(ctx)
-
-    if not row:
-        return await send_error(ctx, "No active giveaway in this channel.")
-
-    await finish_giveaway(row["message_id"], cancelled=True)
-
+async def gcancel(ctx, message_id: int):
+    execute(
+        "UPDATE giveaways SET ended=1 WHERE message_id=?",
+        (message_id,)
+    )
+    task = giveaway_tasks.pop(message_id, None)
+    if task:
+        task.cancel()
+    await success(ctx, "Giveaway cancelled.")
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def greroll(ctx, message_id: int):
-    row = db_fetchone(
-        "SELECT * FROM giveaways WHERE message_id=? AND guild_id=?",
-        (message_id, ctx.guild.id)
+    row = fetchone(
+        "SELECT * FROM giveaways WHERE message_id=? AND ended=1",
+        (message_id,)
     )
-
-    if not row or not row["ended"]:
-        return await send_error(ctx, "Giveaway not found or not ended.")
+    if not row:
+        return await error(ctx, "Ended giveaway not found.")
 
     channel = bot.get_channel(row["channel_id"])
-
     if not channel:
-        return await send_error(ctx, "Giveaway channel not found.")
+        return await error(ctx, "Channel not found.")
 
     try:
-        message = await channel.fetch_message(message_id)
-    except discord.NotFound:
-        return await send_error(ctx, "Giveaway message not found.")
+        msg = await channel.fetch_message(message_id)
+        users = [
+            user async for user in msg.reactions[0].users()
+            if not user.bot
+        ]
+        if not users:
+            return await error(ctx, "No eligible entries.")
 
-    reaction = discord.utils.get(message.reactions, emoji="🎉")
-
-    if not reaction:
-        return await send_error(ctx, "No entries found.")
-
-    users = [
-        user async for user in reaction.users()
-        if not user.bot
-    ]
-
-    if not users:
-        return await send_error(ctx, "No valid entries.")
-
-    winner = random.choice(users)
-
-    await ctx.send(embed=vex_embed(
-        "🔄 GIVEAWAY REROLL",
-        f"New winner: {winner.mention}\nPrize: **{row['prize']}**"
-    ))
+        winner = random.choice(users)
+        await channel.send(
+            embed=embed("GIVEAWAY REROLL", f"New winner: {winner.mention}")
+        )
+    except discord.HTTPException:
+        await error(ctx, "Could not retrieve giveaway entries.")
 
 
-@bot.listen("on_ready")
-async def restore_giveaways():
-    for row in db_fetchall(
-        "SELECT message_id, end_time FROM giveaways WHERE ended=0"
-    ):
-        message_id = row["message_id"]
-
-        if message_id not in giveaway_tasks:
-            giveaway_tasks[message_id] = asyncio.create_task(
-                giveaway_timer(message_id, row["end_time"])
-            )
-
-# =====================================
+# ==========================================
 # INVITE TRACKING
-# =====================================
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS invites (
+    guild_id INTEGER,
+    user_id INTEGER,
+    inviter_id INTEGER
+);
+""")
+db.commit()
 
 invite_cache = {}
 
+@bot.event
+async def on_ready():
+    print(f"VEXORA ready: {bot.user}")
 
-async def cache_guild_invites(guild):
+    for guild in bot.guilds:
+        try:
+            invite_cache[guild.id] = {
+                inv.code: inv.uses
+                for inv in await guild.invites()
+            }
+        except discord.Forbidden:
+            pass
+
+    for row in fetchall("SELECT message_id,end_time FROM giveaways WHERE ended=0"):
+        if row["message_id"] not in giveaway_tasks:
+            giveaway_tasks[row["message_id"]] = asyncio.create_task(
+                giveaway_timer(row["message_id"], row["end_time"])
+            )
+
+@bot.event
+async def on_invite_create(invite):
     try:
-        invites = await guild.invites()
-        invite_cache[guild.id] = {
-            invite.code: invite.uses or 0
-            for invite in invites
+        invite_cache[invite.guild.id] = {
+            inv.code: inv.uses
+            for inv in await invite.guild.invites()
         }
     except discord.Forbidden:
-        print(f"Missing Manage Server permission in {guild.name}")
-    except discord.HTTPException:
         pass
 
-
-@bot.listen("on_ready")
-async def load_invite_cache():
-    for guild in bot.guilds:
-        await cache_guild_invites(guild)
-
-
-@bot.listen("on_guild_join")
-async def joined_guild(guild):
-    await cache_guild_invites(guild)
-
-
-@bot.listen("on_invite_create")
-async def invite_created(invite):
-    await cache_guild_invites(invite.guild)
-
-
-@bot.listen("on_invite_delete")
-async def invite_deleted(invite):
-    await cache_guild_invites(invite.guild)
-
-
-@bot.listen("on_member_join")
-async def track_invite(member):
-    guild = member.guild
-
-    old_invites = invite_cache.get(guild.id, {})
-
+@bot.event
+async def on_member_join(member):
     try:
-        new_invites = await guild.invites()
+        invites = await member.guild.invites()
+        old = invite_cache.get(member.guild.id, {})
+        used = next(
+            (inv for inv in invites if inv.uses > old.get(inv.code, 0)),
+            None
+        )
+
+        invite_cache[member.guild.id] = {
+            inv.code: inv.uses for inv in invites
+        }
+
+        if used and used.inviter:
+            execute(
+                "INSERT INTO invites (guild_id,user_id,inviter_id) VALUES (?,?,?)",
+                (member.guild.id, member.id, used.inviter.id)
+            )
     except discord.Forbidden:
-        return
+        pass
 
-    inviter_id = None
-    updated_cache = {}
-
-    for invite in new_invites:
-        uses = invite.uses or 0
-        updated_cache[invite.code] = uses
-
-        if uses > old_invites.get(invite.code, 0):
-            if invite.inviter:
-                inviter_id = invite.inviter.id
-
-    invite_cache[guild.id] = updated_cache
-
-    if inviter_id is None:
-        return
-
-    db_execute(
-        """
-        INSERT INTO invites (guild_id, user_id, inviter_id, uses)
-        VALUES (?, ?, ?, 1)
-        """,
-        (guild.id, member.id, inviter_id)
-    )
-
-
-@bot.command(name="invites", aliases=["i", "lb"])
-@commands.guild_only()
+@bot.command(name="invites", aliases=["i", "I", "lb"])
 async def invites(ctx, member: discord.Member = None):
     member = member or ctx.author
 
-    rows = db_fetchall(
-        """
-        SELECT COUNT(*) AS total
-        FROM invites
-        WHERE guild_id=? AND inviter_id=?
-        """,
+    row = fetchone(
+        "SELECT COUNT(*) AS total FROM invites WHERE guild_id=? AND inviter_id=?",
         (ctx.guild.id, member.id)
     )
 
-    total = rows[0]["total"]
-
-    await ctx.send(embed=vex_embed(
-        "📨 INVITE COUNT",
-        f"{member.mention} has invited `{total}` members."
-    ))
-
+    await info(ctx, f"{member.mention} has `{row['total']}` tracked invites.")
 
 @bot.command()
-@commands.guild_only()
 async def inviter(ctx, member: discord.Member):
-    row = db_fetchone(
-        """
-        SELECT inviter_id FROM invites
-        WHERE guild_id=? AND user_id=?
-        ORDER BY rowid DESC LIMIT 1
-        """,
+    row = fetchone(
+        "SELECT inviter_id FROM invites WHERE guild_id=? AND user_id=?",
         (ctx.guild.id, member.id)
     )
 
     if not row:
-        return await send_info(ctx, "No inviter information found.")
+        return await info(ctx, "Inviter not found.")
 
-    await send_info(
-        ctx,
-        f"{member.mention} was invited by <@{row['inviter_id']}>."
-    )
-
+    await info(ctx, f"{member.mention} was invited by <@{row['inviter_id']}>.")
 
 @bot.command()
-@commands.guild_only()
-async def inviteinfo(ctx):
-    rows = db_fetchall(
-        """
-        SELECT COUNT(*) AS total
-        FROM invites
-        WHERE guild_id=? AND inviter_id=?
-        """,
-        (ctx.guild.id, ctx.author.id)
-    )
-
-    total = rows[0]["total"]
-
-    await ctx.send(embed=vex_embed(
-        "📊 YOUR INVITE INFO",
-        f"""
-**Inviter:** {ctx.author.mention}
-**Tracked invites:** `{total}`
-"""
-    ))
-
-
-@bot.command()
-@commands.guild_only()
 async def topinvites(ctx):
-    rows = db_fetchall(
-        """
-        SELECT inviter_id, COUNT(*) AS total
-        FROM invites
-        WHERE guild_id=?
-        GROUP BY inviter_id
-        ORDER BY total DESC
-        LIMIT 10
-        """,
+    rows = fetchall(
+        "SELECT inviter_id,COUNT(*) AS total FROM invites WHERE guild_id=? GROUP BY inviter_id ORDER BY total DESC LIMIT 10",
         (ctx.guild.id,)
     )
 
-    if not rows:
-        return await send_info(ctx, "No invite data yet.")
+    e = embed("INVITE LEADERBOARD")
+    e.description = "\n".join(
+        f"**{i}.** <@{r['inviter_id']}> — {r['total']}"
+        for i, r in enumerate(rows, 1)
+    ) or "No invites tracked."
 
-    lines = [
-        f"**{i}.** <@{row['inviter_id']}> — `{row['total']}` invites"
-        for i, row in enumerate(rows, 1)
-    ]
+    await ctx.send(embed=e)
 
-    await ctx.send(embed=vex_embed(
-        "🏆 TOP INVITERS",
-        "\n".join(lines)
-    ))
 
-# =====================================
+# ==========================================
 # REACTION ROLES
-# =====================================
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS reaction_roles (
+    message_id INTEGER,
+    emoji TEXT,
+    role_id INTEGER,
+    PRIMARY KEY (message_id,emoji)
+);
+""")
+db.commit()
 
 @bot.group(invoke_without_command=True)
-@commands.guild_only()
 async def rr(ctx):
-    await send_info(
-        ctx,
-        """
-**REACTION ROLE COMMANDS**
-
-`!rr create <message>`
-`!rr add <message_id> <emoji> @role`
-`!rr remove <message_id> <emoji>`
-`!rr delete <message_id>`
-"""
-    )
-
-
-@rr.command(name="create")
-@commands.has_permissions(manage_roles=True)
-async def rr_create(ctx, *, message_text: str):
-    if len(message_text) > 1500:
-        return await send_error(ctx, "Message is too long.")
-
-    embed = vex_embed("🎭 CHOOSE YOUR ROLES", message_text)
-    message = await ctx.send(embed=embed)
-
-    await send_success(
-        ctx,
-        f"Reaction-role message created. Message ID: `{message.id}`"
-    )
-
+    await info(ctx, "Use `!rr add`, `!rr remove` or `!rr list`.")
 
 @rr.command(name="add")
 @commands.has_permissions(manage_roles=True)
-async def rr_add(
-    ctx,
-    message_id: int,
-    emoji: str,
-    role: discord.Role
-):
-    if role.is_default() or role.managed:
-        return await send_error(ctx, "That role cannot be assigned.")
-
-    if role >= ctx.guild.me.top_role:
-        return await send_error(
-            ctx, "Move the bot's role above the selected role."
-        )
-
+async def rr_add(ctx, message_id: int, emoji: str, role: discord.Role):
     try:
-        message = await ctx.channel.fetch_message(message_id)
-    except discord.NotFound:
-        return await send_error(ctx, "Message not found in this channel.")
+        msg = await ctx.channel.fetch_message(message_id)
+        await msg.add_reaction(emoji)
+    except (discord.HTTPException, discord.NotFound):
+        return await error(ctx, "Could not find message or add reaction.")
 
-    try:
-        await message.add_reaction(emoji)
-    except discord.HTTPException:
-        return await send_error(ctx, "Invalid emoji or reaction unavailable.")
-
-    db_execute(
-        """
-        INSERT INTO reaction_roles (guild_id, message_id, emoji, role_id)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(message_id, emoji)
-        DO UPDATE SET role_id=excluded.role_id
-        """,
-        (ctx.guild.id, message_id, emoji, role.id)
+    execute(
+        "INSERT OR REPLACE INTO reaction_roles VALUES (?,?,?)",
+        (message_id, emoji, role.id)
     )
-
-    await send_success(
-        ctx, f"{emoji} now gives the **{role.name}** role."
-    )
-
+    await success(ctx, f"Reaction role added for {role.mention}.")
 
 @rr.command(name="remove")
 @commands.has_permissions(manage_roles=True)
-async def rr_remove(ctx, message_id: int, *, emoji: str):
-    db_execute(
-        """
-        DELETE FROM reaction_roles
-        WHERE guild_id=? AND message_id=? AND emoji=?
-        """,
-        (ctx.guild.id, message_id, emoji)
+async def rr_remove(ctx, message_id: int, emoji: str):
+    execute(
+        "DELETE FROM reaction_roles WHERE message_id=? AND emoji=?",
+        (message_id, emoji)
     )
-
-    await send_success(ctx, "Reaction role configuration removed.")
-
-
-@rr.command(name="delete")
-@commands.has_permissions(manage_roles=True)
-async def rr_delete(ctx, message_id: int):
-    db_execute(
-        """
-        DELETE FROM reaction_roles
-        WHERE guild_id=? AND message_id=?
-        """,
-        (ctx.guild.id, message_id)
-    )
-
-    await send_success(ctx, "All reaction roles for that message removed.")
-
+    await success(ctx, "Reaction role removed.")
 
 @bot.listen("on_raw_reaction_add")
 async def reaction_role_add(payload):
     if payload.member is None or payload.member.bot:
         return
 
-    row = db_fetchone(
-        """
-        SELECT role_id FROM reaction_roles
-        WHERE guild_id=? AND message_id=? AND emoji=?
-        """,
-        (
-            payload.guild_id,
-            payload.message_id,
-            str(payload.emoji)
-        )
+    row = fetchone(
+        "SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
+        (payload.message_id, str(payload.emoji))
     )
-
     if not row:
         return
 
@@ -1738,30 +1230,21 @@ async def reaction_role_add(payload):
     if not guild:
         return
 
-    member = payload.member
     role = guild.get_role(row["role_id"])
+    member = guild.get_member(payload.user_id)
 
-    if role and role < guild.me.top_role:
+    if role and member:
         try:
-            await member.add_roles(role, reason="VEXORA reaction role")
-        except discord.Forbidden:
+            await member.add_roles(role)
+        except discord.HTTPException:
             pass
-
 
 @bot.listen("on_raw_reaction_remove")
 async def reaction_role_remove(payload):
-    row = db_fetchone(
-        """
-        SELECT role_id FROM reaction_roles
-        WHERE guild_id=? AND message_id=? AND emoji=?
-        """,
-        (
-            payload.guild_id,
-            payload.message_id,
-            str(payload.emoji)
-        )
+    row = fetchone(
+        "SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
+        (payload.message_id, str(payload.emoji))
     )
-
     if not row:
         return
 
@@ -1769,77 +1252,67 @@ async def reaction_role_remove(payload):
     if not guild:
         return
 
-    member = guild.get_member(payload.user_id)
     role = guild.get_role(row["role_id"])
+    member = guild.get_member(payload.user_id)
 
-    if member and role and role < guild.me.top_role:
+    if role and member and not member.bot:
         try:
-            await member.remove_roles(role, reason="VEXORA reaction role")
-        except discord.Forbidden:
+            await member.remove_roles(role)
+        except discord.HTTPException:
             pass
 
-# =====================================
-# TICKET SYSTEM
-# =====================================
+
+# ==========================================
+# TICKETS
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS tickets (
+    channel_id INTEGER PRIMARY KEY,
+    guild_id INTEGER,
+    user_id INTEGER,
+    claimed_by INTEGER
+);
+CREATE TABLE IF NOT EXISTS server_settings (
+    guild_id INTEGER PRIMARY KEY,
+    ticket_category INTEGER
+);
+""")
+db.commit()
 
 @bot.command()
-@commands.guild_only()
-@commands.has_permissions(manage_channels=True)
+@commands.has_permissions(manage_guild=True)
 async def ticketsetup(ctx, category: discord.CategoryChannel):
-    db_execute(
-        """
-        INSERT INTO server_settings (guild_id, ticket_category)
-        VALUES (?, ?)
-        ON CONFLICT(guild_id)
-        DO UPDATE SET ticket_category=excluded.ticket_category
-        """,
+    execute(
+        "INSERT OR REPLACE INTO server_settings VALUES (?,?)",
         (ctx.guild.id, category.id)
     )
-
-    await send_success(ctx, f"Ticket category set to **{category.name}**.")
-
+    await success(ctx, f"Ticket category set to {category.name}.")
 
 @bot.command()
-@commands.guild_only()
 async def ticket(ctx):
-    existing = db_fetchone(
-        """
-        SELECT channel_id FROM tickets
-        WHERE guild_id=? AND user_id=?
-        """,
-        (ctx.guild.id, ctx.author.id)
-    )
-
-    if existing:
-        channel = ctx.guild.get_channel(existing["channel_id"])
-
-        if channel:
-            return await send_error(
-                ctx, f"You already have a ticket: {channel.mention}"
-            )
-
-        db_execute(
-            "DELETE FROM tickets WHERE channel_id=?",
-            (existing["channel_id"],)
-        )
-
-    settings = db_fetchone(
+    row = fetchone(
         "SELECT ticket_category FROM server_settings WHERE guild_id=?",
         (ctx.guild.id,)
     )
+    if not row:
+        return await error(ctx, "Tickets are not configured.")
 
-    if not settings:
-        return await send_error(ctx, "Ticket system is not configured.")
-
-    category = ctx.guild.get_channel(settings["ticket_category"])
-
+    category = ctx.guild.get_channel(row["ticket_category"])
     if not isinstance(category, discord.CategoryChannel):
-        return await send_error(ctx, "Ticket category not found.")
+        return await error(ctx, "Ticket category not found.")
+
+    existing = fetchone(
+        "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=?",
+        (ctx.guild.id, ctx.author.id)
+    )
+    if existing:
+        channel = ctx.guild.get_channel(existing["channel_id"])
+        if channel:
+            return await error(ctx, f"You already have {channel.mention}.")
 
     overwrites = {
-        ctx.guild.default_role: discord.PermissionOverwrite(
-            view_channel=False
-        ),
+        ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
         ctx.author: discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
@@ -1848,14 +1321,12 @@ async def ticket(ctx):
         ctx.guild.me: discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
-            manage_channels=True,
-            read_message_history=True
+            manage_channels=True
         )
     }
 
-    # Inherit category permissions for staff roles that can manage channels.
     for role in ctx.guild.roles:
-        if role.permissions.manage_channels and role != ctx.guild.default_role:
+        if role.permissions.manage_channels:
             overwrites[role] = discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
@@ -1863,823 +1334,489 @@ async def ticket(ctx):
             )
 
     channel = await ctx.guild.create_text_channel(
-        name=f"ticket-{ctx.author.name}".lower()[:90],
+        f"ticket-{ctx.author.name}",
         category=category,
-        overwrites=overwrites,
-        reason="VEXORA ticket opened"
+        overwrites=overwrites
     )
 
-    db_execute(
-        """
-        INSERT INTO tickets (channel_id, guild_id, user_id, claimed_by)
-        VALUES (?, ?, ?, NULL)
-        """,
+    execute(
+        "INSERT INTO tickets VALUES (?,?,?,NULL)",
         (channel.id, ctx.guild.id, ctx.author.id)
     )
 
     await channel.send(
-        embed=vex_embed(
-            "🎫 SUPPORT TICKET",
-            f"Welcome {ctx.author.mention}!\n"
-            "Please explain what you need help with.\n\n"
-            "Staff can use `!claim` and `!close`."
-        )
+        embed=embed("SUPPORT TICKET", f"{ctx.author.mention}, describe your issue.\nUse `!claim` or `!close`.")
     )
-
-    await send_success(ctx, f"Ticket created: {channel.mention}")
-
+    await success(ctx, f"Ticket created: {channel.mention}")
 
 @bot.command()
-@commands.guild_only()
 @commands.has_permissions(manage_channels=True)
 async def claim(ctx):
-    row = db_fetchone(
-        "SELECT * FROM tickets WHERE channel_id=? AND guild_id=?",
-        (ctx.channel.id, ctx.guild.id)
-    )
-
+    row = fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
     if not row:
-        return await send_error(ctx, "This is not a ticket channel.")
+        return await error(ctx, "This is not a ticket.")
 
-    if row["claimed_by"]:
-        return await send_error(ctx, "This ticket is already claimed.")
-
-    db_execute(
+    execute(
         "UPDATE tickets SET claimed_by=? WHERE channel_id=?",
         (ctx.author.id, ctx.channel.id)
     )
-
-    await send_success(ctx, f"Ticket claimed by {ctx.author.mention}.")
-
+    await success(ctx, f"Ticket claimed by {ctx.author.mention}.")
 
 @bot.command()
-@commands.guild_only()
 async def close(ctx):
-    row = db_fetchone(
-        "SELECT * FROM tickets WHERE channel_id=? AND guild_id=?",
-        (ctx.channel.id, ctx.guild.id)
-    )
-
+    row = fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
     if not row:
-        return await send_error(ctx, "This is not a ticket channel.")
+        return await error(ctx, "This is not a ticket.")
 
-    is_owner = row["user_id"] == ctx.author.id
-    is_staff_member = (
-        ctx.author.guild_permissions.manage_channels
-        or ctx.author.guild_permissions.administrator
-    )
+    if ctx.author.id != row["user_id"] and not ctx.author.guild_permissions.manage_channels:
+        return await error(ctx, "You cannot close this ticket.")
 
-    if not is_owner and not is_staff_member:
-        return await send_error(ctx, "Only the ticket owner or staff can close it.")
-
-    db_execute(
-        "DELETE FROM tickets WHERE channel_id=?",
-        (ctx.channel.id,)
-    )
-
-    await send_success(ctx, "Ticket closing in 3 seconds.")
-
+    execute("DELETE FROM tickets WHERE channel_id=?", (ctx.channel.id,))
+    await success(ctx, "Ticket closing in 3 seconds.")
     await asyncio.sleep(3)
-    await ctx.channel.delete(reason="VEXORA ticket closed")
+    await ctx.channel.delete()
 
-# =====================================
-# SNIPE SYSTEM
-# =====================================
 
-@bot.listen("on_message_delete")
-async def save_deleted_message(message):
-    if not message.guild or message.author.bot:
-        return
+# ==========================================
+# SNIPER
+# ==========================================
 
-    content = message.content or ""
+db.executescript("""
+CREATE TABLE IF NOT EXISTS snipes (
+    channel_id INTEGER PRIMARY KEY,
+    author_id INTEGER,
+    content TEXT,
+    deleted_at INTEGER
+);
+""")
+db.commit()
 
-    db_execute(
-        """
-        INSERT INTO snipes (channel_id, author_id, content, deleted_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(channel_id)
-        DO UPDATE SET
-            author_id=excluded.author_id,
-            content=excluded.content,
-            deleted_at=excluded.deleted_at
-        """,
-        (
-            message.channel.id,
-            message.author.id,
-            content[:1500],
-            int(time.time())
+@bot.event
+async def on_message_delete(message):
+    if message.guild and not message.author.bot and message.content:
+        execute(
+            "INSERT OR REPLACE INTO snipes VALUES (?,?,?,?)",
+            (message.channel.id, message.author.id, message.content, int(time.time()))
+        )
+
+@bot.command(name="s")
+async def snipe(ctx):
+    row = fetchone("SELECT * FROM snipes WHERE channel_id=?", (ctx.channel.id,))
+    if not row:
+        return await info(ctx, "Nothing to snipe.")
+
+    await ctx.send(
+        embed=embed(
+            "LAST DELETED MESSAGE",
+            f"Author: <@{row['author_id']}>\nMessage: {row['content']}"
         )
     )
 
-
-@bot.command(name="s")
-@commands.guild_only()
-async def snipe(ctx):
-    row = db_fetchone(
-        "SELECT * FROM snipes WHERE channel_id=?",
-        (ctx.channel.id,)
-    )
-
-    if not row:
-        return await send_error(ctx, "Nothing to snipe.")
-
-    embed = vex_embed(
-        "🗑️ DELETED MESSAGE",
-        row["content"] or "*No text content was saved.*"
-    )
-
-    embed.add_field(
-        name="Author",
-        value=f"<@{row['author_id']}>",
-        inline=False
-    )
-
-    embed.add_field(
-        name="Deleted",
-        value=f"<t:{row['deleted_at']}:R>",
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
+@bot.command()
+async def cs(ctx):
+    execute("DELETE FROM snipes WHERE channel_id=?", (ctx.channel.id,))
+    await success(ctx, "Snipe cleared.")
 
 
-@bot.command(name="cs")
-@commands.guild_only()
-@commands.has_permissions(manage_messages=True)
-async def clearsnipe(ctx):
-    db_execute(
-        "DELETE FROM snipes WHERE channel_id=?",
-        (ctx.channel.id,)
-    )
+# ==========================================
+# ANNOUNCEMENTS
+# ==========================================
 
-    await send_success(ctx, "Saved snipe cleared.")
-
-# =====================================
-# SERVER UTILITY COMMANDS
-# =====================================
+pending_announcement = {}
 
 @bot.command()
-@commands.guild_only()
-@commands.has_permissions(manage_channels=True)
-async def renamechannel(ctx, channel: discord.TextChannel, *, name: str):
-    if len(name) > 100:
-        return await send_error(ctx, "Channel name is too long.")
+@owner_only()
+async def announce(ctx, *, message):
+    pending_announcement[ctx.author.id] = message
 
-    await channel.edit(name=name)
-    await send_success(ctx, f"Renamed channel to **{name}**.")
-
+    await ctx.send(
+        embed=embed(
+            "ANNOUNCEMENT PREVIEW",
+            message + "\n\nUse `!announceconfirm` to send or `!announcecancel` to cancel."
+        )
+    )
 
 @bot.command()
-@commands.guild_only()
-@commands.has_permissions(manage_roles=True)
-async def roleinfo(ctx, role: discord.Role):
-    permissions = [
-        name.replace("_", " ").title()
-        for name, enabled in role.permissions
-        if enabled
-    ]
-
-    embed = vex_embed(
-        f"ROLE INFO • {role.name}",
-        f"""
-**ID:** `{role.id}`
-**Members:** `{len(role.members)}`
-**Mentionable:** `{role.mentionable}`
-**Hoisted:** `{role.hoist}`
-**Color:** `{role.color}`
-"""
-    )
-
-    embed.add_field(
-        name="Permissions",
-        value=", ".join(permissions[:20]) or "None",
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
-
-# =====================================
-# OWNER ANNOUNCEMENTS
-# =====================================
-
-pending_announcement = None
-
-
-@bot.command()
-@is_bot_owner()
-async def announce(ctx, *, message: str):
-    global pending_announcement
-
-    if len(message) > 1500:
-        return await send_error(ctx, "Announcement is too long.")
-
-    pending_announcement = message
-
-    embed = vex_embed(
-        "📢 ANNOUNCEMENT PREVIEW",
-        message
-    )
-
-    embed.add_field(
-        name="Delivery",
-        value=f"Will be sent to {len(bot.guilds)} servers.",
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
-    await send_info(
-        ctx,
-        "Use `!announceconfirm` to send, or `!announcecancel` to cancel."
-    )
-
-
-@bot.command()
-@is_bot_owner()
+@owner_only()
 async def announceconfirm(ctx):
-    global pending_announcement
+    message = pending_announcement.pop(ctx.author.id, None)
+    if not message:
+        return await error(ctx, "No pending announcement.")
 
-    if not pending_announcement:
-        return await send_error(ctx, "No pending announcement.")
-
-    message = pending_announcement
-    pending_announcement = None
-
-    success = 0
-    failed = 0
-
+    sent = 0
     for guild in bot.guilds:
         channel = guild.system_channel
 
-        if not channel or not channel.permissions_for(guild.me).send_messages:
+        if not channel:
             channel = next(
                 (
-                    ch for ch in guild.text_channels
-                    if ch.permissions_for(guild.me).send_messages
+                    c for c in guild.text_channels
+                    if c.permissions_for(guild.me).send_messages
                 ),
                 None
             )
 
-        if not channel:
-            failed += 1
-            continue
+        if channel:
+            try:
+                await channel.send(
+                    embed=embed("VEXORA ANNOUNCEMENT", message),
+                    allowed_mentions=discord.AllowedMentions.none()
+                )
+                sent += 1
+            except discord.HTTPException:
+                pass
 
-        try:
-            await channel.send(
-                embed=vex_embed("📢 VEXORA ANNOUNCEMENT", message),
-                allowed_mentions=discord.AllowedMentions.none()
-            )
-            success += 1
-        except discord.HTTPException:
-            failed += 1
-
-        await asyncio.sleep(1)
-
-    await send_info(
-        ctx,
-        f"Announcement finished.\n\n"
-        f"**Sent:** `{success}`\n"
-        f"**Failed:** `{failed}`"
-    )
-
+    await success(ctx, f"Announcement sent to {sent} servers.")
 
 @bot.command()
-@is_bot_owner()
+@owner_only()
 async def announcecancel(ctx):
-    global pending_announcement
-
-    if not pending_announcement:
-        return await send_error(ctx, "No pending announcement.")
-
-    pending_announcement = None
-    await send_success(ctx, "Announcement cancelled.")
-
-# =====================================
-# FIRST TO REACT GAME
-# =====================================
-
-ftr_active = {}
+    pending_announcement.pop(ctx.author.id, None)
+    await success(ctx, "Announcement cancelled.")
 
 
-@bot.group(invoke_without_command=True)
-@commands.guild_only()
-async def ftr(ctx):
-    await send_info(
-        ctx,
-        """
-**FTR COMMANDS**
+# ==========================================
+# FIRST TO REACT
+# ==========================================
 
-`!ftr start [seconds]`
-`!ftr stop`
-`!ftr winner`
-`!ftr leaderboard`
-"""
-    )
+ftr_games = {}
 
-
-@ftr.command(name="start")
+@bot.command()
 @commands.has_permissions(manage_guild=True)
-async def ftr_start(ctx, seconds: int = 30):
-    if not 5 <= seconds <= 300:
-        return await send_error(ctx, "Duration must be 5–300 seconds.")
+async def ftr(ctx, action="start", seconds: int = 15):
+    action = action.lower()
 
-    if ctx.channel.id in ftr_active:
-        return await send_error(ctx, "FTR is already running here.")
+    if action == "start":
+        if ctx.channel.id in ftr_games:
+            return await error(ctx, "A game is already running.")
 
-    embed = vex_embed(
-        "⚡ FIRST TO REACT",
-        f"React with ⚡ first!\n\n**Time:** {seconds} seconds"
-    )
+        if seconds < 5 or seconds > 120:
+            return await error(ctx, "Choose 5–120 seconds.")
 
-    message = await ctx.send(embed=embed)
-    await message.add_reaction("⚡")
+        msg = await ctx.send(
+            embed=embed("FIRST TO REACT", f"React with ⚡ first!\nTime: {seconds} seconds.")
+        )
+        await msg.add_reaction("⚡")
 
-    ftr_active[ctx.channel.id] = {
-        "message_id": message.id,
-        "winner": None,
-        "ends": time.time() + seconds,
-        "guild_id": ctx.guild.id
-    }
+        ftr_games[ctx.channel.id] = {
+            "message_id": msg.id,
+            "winner": None
+        }
 
-    await asyncio.sleep(seconds)
+        await asyncio.sleep(seconds)
 
-    game = ftr_active.get(ctx.channel.id)
-
-    if game and game["message_id"] == message.id:
-        winner = game["winner"]
-        del ftr_active[ctx.channel.id]
-
-        if winner:
-            await ctx.send(
-                embed=vex_embed(
-                    "🏆 FTR WINNER",
-                    f"{winner.mention} reacted first!"
+        game = ftr_games.get(ctx.channel.id)
+        if game:
+            winner = game["winner"]
+            if winner:
+                execute(
+                    "INSERT OR IGNORE INTO ftr_scores VALUES (?,?,0)",
+                    (ctx.guild.id, winner)
                 )
-            )
-        else:
-            await send_info(ctx, "FTR ended. Nobody reacted!")
+                execute(
+                    "UPDATE ftr_scores SET wins=wins+1 WHERE guild_id=? AND user_id=?",
+                    (ctx.guild.id, winner)
+                )
+                await ctx.send(embed=embed("FTR WINNER", f"<@{winner}> won!"))
+            else:
+                await ctx.send(embed=embed("FTR ENDED", "Nobody reacted in time."))
+            ftr_games.pop(ctx.channel.id, None)
 
+    elif action == "stop":
+        ftr_games.pop(ctx.channel.id, None)
+        await success(ctx, "FTR stopped.")
 
-@ftr.command(name="stop")
-@commands.has_permissions(manage_guild=True)
-async def ftr_stop(ctx):
-    game = ftr_active.pop(ctx.channel.id, None)
-
-    if not game:
-        return await send_error(ctx, "No active FTR game.")
-
-    await send_success(ctx, "FTR stopped.")
-
-
-@ftr.command(name="winner")
-async def ftr_winner(ctx):
-    game = ftr_active.get(ctx.channel.id)
-
-    if not game:
-        return await send_error(ctx, "No active FTR game.")
-
-    winner = game["winner"]
-
-    if not winner:
-        return await send_info(ctx, "No winner yet.")
-
-    await send_info(ctx, f"Current winner: {winner.mention}")
-
-
-@ftr.command(name="leaderboard")
-@commands.guild_only()
-async def ftr_leaderboard(ctx):
-    rows = db_fetchall(
-        """
-        SELECT user_id, wins
-        FROM ftr_scores
-        WHERE guild_id=?
-        ORDER BY wins DESC
-        LIMIT 10
-        """,
-        (ctx.guild.id,)
-    )
-
-    if not rows:
-        return await send_info(ctx, "No FTR wins yet.")
-
-    lines = [
-        f"**{i}.** <@{row['user_id']}> — `{row['wins']} wins`"
-        for i, row in enumerate(rows, 1)
-    ]
-
-    await ctx.send(embed=vex_embed(
-        "⚡ FTR LEADERBOARD",
-        "\n".join(lines)
-    ))
-
+    else:
+        await error(ctx, "Use `!ftr start` or `!ftr stop`.")
 
 @bot.listen("on_raw_reaction_add")
 async def ftr_reaction(payload):
-    if str(payload.emoji) != "⚡":
+    if str(payload.emoji) != "⚡" or payload.member is None or payload.member.bot:
         return
 
-    if payload.member is None or payload.member.bot:
-        return
+    game = ftr_games.get(payload.channel_id)
+    if game and payload.message_id == game["message_id"] and not game["winner"]:
+        game["winner"] = payload.user_id
 
-    game = ftr_active.get(payload.channel_id)
 
-    if not game or game["message_id"] != payload.message_id:
-        return
-
-    if game["winner"] is not None:
-        return
-
-    game["winner"] = payload.member
-
-    db_execute(
-        """
-        INSERT INTO ftr_scores (guild_id, user_id, wins)
-        VALUES (?, ?, 1)
-        ON CONFLICT(guild_id, user_id)
-        DO UPDATE SET wins=wins+1
-        """,
-        (payload.guild_id, payload.user_id)
-    )
-
-# =====================================
-# BOT STATUS CONTROLS
-# =====================================
+# ==========================================
+# BOT STATUS
+# ==========================================
 
 @bot.command()
-@is_bot_owner()
-async def playing(ctx, *, text: str):
+@owner_only()
+async def playing(ctx, *, text):
     await bot.change_presence(
         activity=discord.Game(name=text)
     )
-
-    await send_success(ctx, f"Playing status changed to **{text}**.")
-
+    await success(ctx, f"Playing status changed to: {text}")
 
 @bot.command()
-@is_bot_owner()
-async def status(ctx, state: str):
-    statuses = {
+@owner_only()
+async def stext(ctx, *, text):
+    await bot.change_presence(
+        activity=discord.CustomActivity(name=text)
+    )
+    await success(ctx, f"Custom status changed to: {text}")
+
+@bot.command()
+@owner_only()
+async def status(ctx, mode: str):
+    modes = {
         "online": discord.Status.online,
         "offline": discord.Status.invisible,
         "dnd": discord.Status.dnd,
         "sleep": discord.Status.idle
     }
 
-    state = state.lower()
+    mode = mode.lower()
+    if mode not in modes:
+        return await error(ctx, "Use online, offline, dnd or sleep.")
 
-    if state not in statuses:
-        return await send_error(
-            ctx, "Choose: `online`, `offline`, `dnd`, or `sleep`."
-        )
-
-    await bot.change_presence(
-        status=statuses[state]
-    )
-
-    await send_success(ctx, f"Bot status changed to **{state}**.")
+    await bot.change_presence(status=modes[mode])
+    await success(ctx, f"Status changed to {mode}.")
 
 
-@bot.command()
-@is_bot_owner()
-async def stext(ctx, *, text: str):
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name=text
-        )
-    )
-
-    await send_success(ctx, f"Activity text changed to **{text}**.")
-
-# =====================================
+# ==========================================
 # PREMIUM CUSTOM COMMANDS
-# =====================================
+# ==========================================
+
+db.executescript("""
+CREATE TABLE IF NOT EXISTS custom_commands (
+    guild_id INTEGER,
+    name TEXT,
+    response TEXT,
+    created_by INTEGER,
+    PRIMARY KEY (guild_id,name)
+);
+""")
+db.commit()
 
 @bot.group(invoke_without_command=True)
-@commands.guild_only()
 async def cc(ctx):
-    await send_info(
-        ctx,
-        """
-**PREMIUM CUSTOM COMMANDS**
-
-`!cc add <name> <response>`
-`!cc edit <name> <response>`
-`!cc remove <name>`
-`!cc list`
-`!cc info <name>`
-
-Custom commands are a Premium feature.
-"""
-    )
-
+    await info(ctx, "Use `!cc add`, `!cc edit`, `!cc remove`, `!cc list` or `!cc info`.")
 
 @cc.command(name="add")
-@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def cc_add(ctx, name: str, *, response: str):
     if not await is_premium(ctx.guild.id):
-        return await send_error(ctx, "This server needs Premium.")
+        return await error(ctx, "Custom commands require server premium.")
 
     name = name.lower()
 
     if not re.fullmatch(r"[a-z0-9_-]{2,32}", name):
-        return await send_error(
-            ctx, "Use 2–32 letters, numbers, underscores or hyphens."
-        )
+        return await error(ctx, "Use 2–32 letters, numbers, _ or -.")
 
     if bot.get_command(name):
-        return await send_error(ctx, "That name is already a built-in command.")
+        return await error(ctx, "That name is already a built-in command.")
 
-    if len(response) > 1500:
-        return await send_error(ctx, "Response is too long.")
-
-    existing = db_fetchone(
-        "SELECT name FROM custom_commands WHERE guild_id=? AND name=?",
-        (ctx.guild.id, name)
-    )
-
-    if existing:
-        return await send_error(ctx, "That custom command already exists.")
-
-    db_execute(
-        """
-        INSERT INTO custom_commands (guild_id, name, response, created_by)
-        VALUES (?, ?, ?, ?)
-        """,
+    execute(
+        "INSERT OR REPLACE INTO custom_commands VALUES (?,?,?,?)",
         (ctx.guild.id, name, response, ctx.author.id)
     )
-
-    await send_success(ctx, f"Custom command `!{name}` created!")
-
+    await success(ctx, f"Custom command `{name}` created.")
 
 @cc.command(name="edit")
-@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def cc_edit(ctx, name: str, *, response: str):
     if not await is_premium(ctx.guild.id):
-        return await send_error(ctx, "This server needs Premium.")
+        return await error(ctx, "Server premium required.")
 
-    name = name.lower()
-
-    if len(response) > 1500:
-        return await send_error(ctx, "Response is too long.")
-
-    result = db_execute(
-        """
-        UPDATE custom_commands
-        SET response=?
-        WHERE guild_id=? AND name=?
-        """,
-        (response, ctx.guild.id, name)
+    row = fetchone(
+        "SELECT name FROM custom_commands WHERE guild_id=? AND name=?",
+        (ctx.guild.id, name.lower())
     )
+    if not row:
+        return await error(ctx, "Custom command not found.")
 
-    if result.rowcount == 0:
-        return await send_error(ctx, "Custom command not found.")
-
-    await send_success(ctx, f"`!{name}` updated!")
-
+    execute(
+        "UPDATE custom_commands SET response=? WHERE guild_id=? AND name=?",
+        (response, ctx.guild.id, name.lower())
+    )
+    await success(ctx, f"Updated `{name}`.")
 
 @cc.command(name="remove")
-@commands.guild_only()
 @commands.has_permissions(manage_guild=True)
 async def cc_remove(ctx, name: str):
-    if not await is_premium(ctx.guild.id):
-        return await send_error(ctx, "This server needs Premium.")
-
-    result = db_execute(
+    execute(
         "DELETE FROM custom_commands WHERE guild_id=? AND name=?",
         (ctx.guild.id, name.lower())
     )
-
-    if result.rowcount == 0:
-        return await send_error(ctx, "Custom command not found.")
-
-    await send_success(ctx, f"`!{name}` removed.")
-
+    await success(ctx, f"Removed `{name}`.")
 
 @cc.command(name="list")
-@commands.guild_only()
 async def cc_list(ctx):
-    if not await is_premium(ctx.guild.id):
-        return await send_error(ctx, "This server needs Premium.")
-
-    rows = db_fetchall(
-        """
-        SELECT name FROM custom_commands
-        WHERE guild_id=?
-        ORDER BY name
-        """,
+    rows = fetchall(
+        "SELECT name FROM custom_commands WHERE guild_id=?",
         (ctx.guild.id,)
     )
-
-    if not rows:
-        return await send_info(ctx, "No custom commands created yet.")
-
-    names = [f"`!{row['name']}`" for row in rows]
-
-    await ctx.send(embed=vex_embed(
-        "⚙️ CUSTOM COMMANDS",
-        "\n".join(names)
-    ))
-
+    e = embed("CUSTOM COMMANDS")
+    e.description = "\n".join(f"`{r['name']}`" for r in rows) or "No custom commands."
+    await ctx.send(embed=e)
 
 @cc.command(name="info")
-@commands.guild_only()
 async def cc_info(ctx, name: str):
-    if not await is_premium(ctx.guild.id):
-        return await send_error(ctx, "This server needs Premium.")
-
-    row = db_fetchone(
-        """
-        SELECT name, response, created_by
-        FROM custom_commands
-        WHERE guild_id=? AND name=?
-        """,
+    row = fetchone(
+        "SELECT response,created_by FROM custom_commands WHERE guild_id=? AND name=?",
         (ctx.guild.id, name.lower())
     )
-
     if not row:
-        return await send_error(ctx, "Custom command not found.")
+        return await error(ctx, "Custom command not found.")
 
-    await ctx.send(embed=vex_embed(
-        f"CUSTOM COMMAND • {row['name']}",
-        f"**Response:**\n{row['response']}\n\n"
-        f"**Created by:** <@{row['created_by']}>"
-    ))
+    await ctx.send(
+        embed=embed(
+            f"CUSTOM COMMAND: {name}",
+            f"Response: {row['response']}\nCreated by: <@{row['created_by']}>"
+        )
+    )
 
-
-# Custom command execution listener
 @bot.listen("on_message")
-async def execute_custom_commands(message):
+async def custom_command_listener(message):
     if message.author.bot or not message.guild:
         return
 
-    used_prefix = next(
-        (
-            prefix for prefix in PREFIXES
-            if message.content.startswith(prefix)
-        ),
+    prefix = next(
+        (p for p in PREFIXES if message.content.startswith(p)),
         None
     )
-
-    if not used_prefix:
+    if not prefix:
         return
 
-    content = message.content[len(used_prefix):].strip()
+    name = message.content[len(prefix):].split(" ", 1)[0].lower()
 
-    if not content:
-        return
-
-    name = content.split(maxsplit=1)[0].lower()
-
-    # Built-in commands always take priority.
-    if bot.get_command(name):
+    if not name or bot.get_command(name):
         return
 
     if not await is_premium(message.guild.id):
         return
 
-    row = db_fetchone(
-        """
-        SELECT response FROM custom_commands
-        WHERE guild_id=? AND name=?
-        """,
+    row = fetchone(
+        "SELECT response FROM custom_commands WHERE guild_id=? AND name=?",
         (message.guild.id, name)
     )
+    if row:
+        await message.channel.send(
+            row["response"],
+            allowed_mentions=discord.AllowedMentions.none()
+        )
 
-    if not row:
-        return
 
-    await message.channel.send(
-        row["response"],
-        allowed_mentions=discord.AllowedMentions.none()
-    )
-
-# =====================================
+# ==========================================
 # DYNAMIC HELP COMMAND
-# =====================================
+# ==========================================
 
-@bot.command(name="help")
-async def help_command(ctx, *, command_name: str = None):
-
+@bot.command()
+async def help(ctx, command_name: str = None):
     if command_name:
-        command = bot.get_command(command_name.lower())
-
+        command = bot.get_command(command_name)
         if not command:
-            return await send_error(ctx, "Command not found.")
+            return await error(ctx, "Command not found.")
 
-        description = command.help or command.short_doc or "No description."
+        e = embed(
+            f"HELP: {command.qualified_name}",
+            command.help or "No description available."
+        )
 
         if isinstance(command, commands.Group):
-            subcommands = [
-                f"`{sub.name}`"
-                for sub in command.commands
-            ]
-
-            description += "\n\n**Subcommands:**\n"
-            description += ", ".join(subcommands) or "None"
-
-        return await ctx.send(
-            embed=vex_embed(
-                f"HELP • {command.qualified_name}",
-                description
+            e.add_field(
+                name="Subcommands",
+                value=", ".join(c.name for c in command.commands) or "None",
+                inline=False
             )
-        )
+
+        return await ctx.send(embed=e)
 
     categories = {
         "General": [],
         "Moderation": [],
         "Economy & Games": [],
-        "Social & Levels": [],
+        "Community": [],
+        "Fun": [],
         "Server Tools": [],
-        "Premium & Owner": []
+        "Premium": [],
+        "Owner": []
     }
 
-    moderation = {
-        "ban", "unban", "modkick", "timeout", "untimeout",
-        "purge", "lock", "unlock", "slowmode", "warn",
-        "warnings", "clearwarns", "staff"
-    }
+    category_map = {
+        "ping": "General", "botinfo": "General",
+        "serverinfo": "General", "userinfo": "General",
+        "avatar": "General", "support": "General",
 
-    economy = {
-        "balance", "daily", "weekly", "work", "beg",
-        "pay", "leaderboard", "flip", "dice", "rps",
-        "guess", "trivia"
-    }
+        "ban": "Moderation", "unban": "Moderation",
+        "modkick": "Moderation", "timeout": "Moderation",
+        "untimeout": "Moderation", "purge": "Moderation",
+        "lock": "Moderation", "unlock": "Moderation",
+        "slowmode": "Moderation", "warn": "Moderation",
+        "warnings": "Moderation", "clearwarns": "Moderation",
+        "staff": "Moderation",
 
-    social = {
-        "rep", "reps", "repboard", "rank", "level",
-        "levels", "afk", "kiss", "punch", "kick"
-    }
+        "balance": "Economy & Games", "daily": "Economy & Games",
+        "weekly": "Economy & Games", "work": "Economy & Games",
+        "beg": "Economy & Games", "pay": "Economy & Games",
+        "leaderboard": "Economy & Games", "dice": "Economy & Games",
+        "flip": "Economy & Games", "rps": "Economy & Games",
 
-    server_tools = {
-        "confess", "confesssetup", "confessionsoff",
-        "suggest", "suggestsetup", "poll", "invites",
-        "inviter", "inviteinfo", "topinvites", "rr",
-        "ticketsetup", "ticket", "claim", "close",
-        "s", "cs", "renamechannel", "roleinfo",
-        "gstart", "gend", "gcancel", "greroll",
-        "ftr"
-    }
+        "afk": "Community", "confess": "Community",
+        "confesssetup": "Community", "confessionsoff": "Community",
+        "suggest": "Community", "suggestsetup": "Community",
+        "poll": "Community", "rep": "Community",
+        "reps": "Community", "rank": "Community",
+        "level": "Community",
 
-    owner_tools = {
-        "premium", "cc", "announce", "announceconfirm",
-        "announcecancel", "playing", "status", "stext"
+        "kiss": "Fun", "punch": "Fun", "kick": "Fun",
+
+        "gstart": "Server Tools", "gend": "Server Tools",
+        "gcancel": "Server Tools", "greroll": "Server Tools",
+        "invites": "Server Tools", "inviter": "Server Tools",
+        "topinvites": "Server Tools", "rr": "Server Tools",
+        "ticket": "Server Tools", "ticketsetup": "Server Tools",
+        "claim": "Server Tools", "close": "Server Tools",
+        "s": "Server Tools", "cs": "Server Tools",
+        "ftr": "Server Tools",
+
+        "premium": "Premium", "cc": "Premium",
+
+        "announce": "Owner", "announceconfirm": "Owner",
+        "announcecancel": "Owner", "playing": "Owner",
+        "status": "Owner", "stext": "Owner"
     }
 
     for command in bot.commands:
         if command.hidden:
             continue
 
-        name = command.name
+        category = category_map.get(command.name, "General")
+        categories[category].append(command.name)
 
-        if name == "help":
-            categories["General"].append(name)
-        elif name in moderation:
-            categories["Moderation"].append(name)
-        elif name in economy:
-            categories["Economy & Games"].append(name)
-        elif name in social:
-            categories["Social & Levels"].append(name)
-        elif name in server_tools:
-            categories["Server Tools"].append(name)
-        elif name in owner_tools:
-            categories["Premium & Owner"].append(name)
-        else:
-            categories["General"].append(name)
-
-    embed = vex_embed(
-        "🤖 VEXORA COMMAND CENTER",
-        "One Bot. Endless Possibilities.\n"
-        "Use `!help <command>` for command details."
-    )
+    e = embed("VEXORA COMMANDS")
 
     for category, names in categories.items():
         if names:
-            embed.add_field(
+            e.add_field(
                 name=category,
-                value=" • ".join(f"`{name}`" for name in sorted(set(names))),
+                value=", ".join(f"`{n}`" for n in sorted(set(names))),
                 inline=False
             )
 
-    embed.add_field(
+    e.add_field(
         name="Prefixes",
         value="`!` `?` `.` `$` `-`",
         inline=False
     )
+    e.add_field(
+        name="Support",
+        value=f"[Join here]({SUPPORT_SERVER})",
+        inline=False
+    )
 
-    embed.set_thumbnail(url=bot.user.display_avatar.url)
+    await ctx.send(embed=e)
 
-    await ctx.send(embed=embed)
 
-# =====================================
-# VEXORA STARTUP
-# =====================================
+# ==========================================
+# FINAL STARTUP
+# ==========================================
 
 if not TOKEN:
-    raise RuntimeError(
-        "BOT_TOKEN environment variable is missing!"
-    )
+    raise RuntimeError("BOT_TOKEN environment variable is missing!")
 
 bot.run(TOKEN)
