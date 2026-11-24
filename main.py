@@ -1,21 +1,17 @@
-
 import discord
 from discord.ext import commands
 import os
-import random
 import sqlite3
-import time
+import random
 import asyncio
+import time
 import datetime
 import re
 
-# ==========================================
-# VEXORA CONFIGURATION
-# ==========================================
+# ================= CONFIG =================
 
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 1495419933943922920
-
 SUPPORT_SERVER = "https://discord.gg/ZBaRByVFBC"
 
 PREFIXES = ["!", "?", ".", "$", "-"]
@@ -29,225 +25,138 @@ intents.reactions = True
 bot = commands.Bot(
     command_prefix=PREFIXES,
     intents=intents,
-    help_command=None,
-    case_insensitive=True
+    case_insensitive=True,
+    help_command=None
 )
 
-COLOR = discord.Color.from_rgb(175, 175, 175)
-
-def embed(title, description=None):
-    e = discord.Embed(
-        title=title,
-        description=description,
-        color=COLOR
-    )
-    e.set_footer(
-        text="VEXORA • One Bot. Endless Possibilities."
-    )
-    return e
-
-async def success(ctx, message):
-    await ctx.send(embed=embed("SUCCESS", "✅ " + message))
-
-async def error(ctx, message):
-    await ctx.send(embed=embed("ERROR", "❌ " + message))
-
-async def info(ctx, message):
-    await ctx.send(embed=embed("VEXORA", message))
-
-
-# ==========================================
-# DATABASE
-# ==========================================
+# ================= DATABASE =================
 
 db = sqlite3.connect("vexora.db")
 db.row_factory = sqlite3.Row
 
-def execute(query, params=()):
-    cur = db.cursor()
-    cur.execute(query, params)
+def setup_db():
+    tables = [
+        """CREATE TABLE IF NOT EXISTS premium
+        (guild_id INTEGER PRIMARY KEY, expires INTEGER)""",
+
+        """CREATE TABLE IF NOT EXISTS economy
+        (user_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0,
+        daily INTEGER DEFAULT 0, weekly INTEGER DEFAULT 0)""",
+
+        """CREATE TABLE IF NOT EXISTS warnings
+        (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER,
+        user_id INTEGER, moderator INTEGER, reason TEXT, created INTEGER)""",
+
+        """CREATE TABLE IF NOT EXISTS levels
+        (guild_id INTEGER, user_id INTEGER, xp INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 0, PRIMARY KEY(guild_id,user_id))""",
+
+        """CREATE TABLE IF NOT EXISTS reputation
+        (user_id INTEGER PRIMARY KEY, reps INTEGER DEFAULT 0)""",
+
+        """CREATE TABLE IF NOT EXISTS custom_commands
+        (guild_id INTEGER, name TEXT, response TEXT,
+        PRIMARY KEY(guild_id,name))""",
+
+        """CREATE TABLE IF NOT EXISTS settings
+        (guild_id INTEGER, name TEXT, value TEXT,
+        PRIMARY KEY(guild_id,name))""",
+
+        """CREATE TABLE IF NOT EXISTS reaction_roles
+        (message_id INTEGER, emoji TEXT, role_id INTEGER,
+        PRIMARY KEY(message_id,emoji))"""
+    ]
+
+    for table in tables:
+        db.execute(table)
+    db.commit()
+
+setup_db()
+
+def sql(query, values=()):
+    cur = db.execute(query, values)
     db.commit()
     return cur
 
-def fetchone(query, params=()):
-    return execute(query, params).fetchone()
+def one(query, values=()):
+    return db.execute(query, values).fetchone()
 
-def fetchall(query, params=()):
-    return execute(query, params).fetchall()
+def many(query, values=()):
+    return db.execute(query, values).fetchall()
 
-db.executescript("""
-CREATE TABLE IF NOT EXISTS warnings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id INTEGER,
-    user_id INTEGER,
-    moderator_id INTEGER,
-    reason TEXT
-);
+# ================= EMBEDS =================
 
-CREATE TABLE IF NOT EXISTS premium (
-    guild_id INTEGER PRIMARY KEY,
-    expires INTEGER
-);
+EMBED_COLOR = discord.Color.from_rgb(175, 175, 175)
 
-CREATE TABLE IF NOT EXISTS economy (
-    user_id INTEGER PRIMARY KEY,
-    balance INTEGER DEFAULT 0,
-    daily INTEGER DEFAULT 0,
-    weekly INTEGER DEFAULT 0
-);
+def embed(title, description="", color=EMBED_COLOR):
+    e = discord.Embed(
+        title=title,
+        description=description,
+        color=color,
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+    e.set_footer(text="VEXORA • One Bot. Endless Possibilities.")
+    return e
 
-CREATE TABLE IF NOT EXISTS reputation (
-    guild_id INTEGER,
-    user_id INTEGER,
-    reps INTEGER DEFAULT 0,
-    PRIMARY KEY (guild_id, user_id)
-);
+def success(ctx, message):
+    return ctx.send(embed=embed("✓ Success", message))
 
-CREATE TABLE IF NOT EXISTS levels (
-    guild_id INTEGER,
-    user_id INTEGER,
-    xp INTEGER DEFAULT 0,
-    level INTEGER DEFAULT 0,
-    PRIMARY KEY (guild_id, user_id)
-);
-""")
-db.commit()
+def error(ctx, message):
+    return ctx.send(embed=embed("✕ Error", message))
 
+def info(ctx, message):
+    return ctx.send(embed=embed("VEXORA", message))
 
-# ==========================================
-# PERMISSION CHECKS
-# ==========================================
+# ================= PERMISSIONS =================
 
 def owner_only():
     async def predicate(ctx):
         return ctx.author.id == OWNER_ID
     return commands.check(predicate)
 
-def staff_only():
-    async def predicate(ctx):
-        return (
-            ctx.author.id == OWNER_ID
-            or ctx.author.guild_permissions.manage_messages
-            or ctx.author.guild_permissions.administrator
-        )
-    return commands.check(predicate)
-
-async def is_premium(guild_id):
-    row = fetchone(
-        "SELECT expires FROM premium WHERE guild_id=?",
-        (guild_id,)
-    )
-
+def is_premium(guild_id):
+    row = one("SELECT expires FROM premium WHERE guild_id=?", (guild_id,))
     if not row:
         return False
-
-    expires = row["expires"]
-
-    if expires == 0:
-        return True
-
-    if expires <= int(time.time()):
-        execute(
-            "DELETE FROM premium WHERE guild_id=?",
-            (guild_id,)
-        )
+    if row["expires"] and row["expires"] < int(time.time()):
+        sql("DELETE FROM premium WHERE guild_id=?", (guild_id,))
         return False
-
     return True
 
 def get_balance(user_id):
-    row = fetchone(
-        "SELECT balance FROM economy WHERE user_id=?",
-        (user_id,)
-    )
-
+    row = one("SELECT balance FROM economy WHERE user_id=?", (user_id,))
     if not row:
-        execute(
-            "INSERT INTO economy (user_id, balance) VALUES (?, 0)",
-            (user_id,)
-        )
+        sql("INSERT INTO economy(user_id,balance) VALUES(?,0)", (user_id,))
         return 0
-
     return row["balance"]
 
-
-# ==========================================
-# EVENTS
-# ==========================================
-
-@bot.event
-async def on_ready():
-    print("================================")
-    print(f"VEXORA ONLINE: {bot.user}")
-    print(f"BOT ID: {bot.user.id}")
-    print(f"SERVERS: {len(bot.guilds)}")
-    print("================================")
-
-
-@bot.event
-async def on_command_error(ctx, err):
-    if isinstance(err, commands.CommandNotFound):
-        return
-
-    if isinstance(err, commands.MissingRequiredArgument):
-        return await error(
-            ctx,
-            f"Missing argument: `{err.param.name}`"
-        )
-
-    if isinstance(err, commands.MissingPermissions):
-        return await error(
-            ctx,
-            "You don't have the required permissions."
-        )
-
-    if isinstance(err, commands.NotOwner):
-        return await error(
-            ctx,
-            "Only the bot owner can use this command."
-        )
-
-    if isinstance(err, commands.CheckFailure):
-        return await error(ctx, "You cannot use this command.")
-
-    if isinstance(err, commands.CommandOnCooldown):
-        return await error(
-            ctx,
-            f"Try again in {err.retry_after:.1f} seconds."
-        )
-
-    print("COMMAND ERROR:", repr(err))
-    await error(ctx, "Something went wrong. Check Railway logs.")
-
-
-# ==========================================
-# GENERAL COMMANDS
-# ==========================================
+# ================= GENERAL =================
 
 @bot.command()
 async def ping(ctx):
-    ms = round(bot.latency * 1000)
-    await ctx.send(embed=embed("PONG", f"🏓 `{ms}ms`"))
+    await ctx.send(embed=embed(
+        "🏓 Pong!",
+        f"Latency: `{round(bot.latency * 1000)}ms`"
+    ))
 
 @bot.command()
 async def botinfo(ctx):
-    e = embed(
-        "VEXORA INFORMATION",
-        "One Bot. Endless Possibilities."
-    )
+    e = embed("VEXORA • Bot Information")
     e.add_field(name="Servers", value=len(bot.guilds))
     e.add_field(name="Users", value=len(bot.users))
-    e.add_field(name="Latency", value=f"{round(bot.latency * 1000)}ms")
+    e.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms")
+    e.add_field(name="Prefix", value="`! ? . $ -`")
     await ctx.send(embed=e)
 
 @bot.command()
 async def serverinfo(ctx):
     g = ctx.guild
-    e = embed("SERVER INFORMATION")
-    e.add_field(name="Name", value=g.name)
+    e = embed(g.name)
     e.add_field(name="Members", value=g.member_count)
     e.add_field(name="Owner", value=g.owner.mention if g.owner else "Unknown")
-    e.add_field(name="Created", value=g.created_at.strftime("%d %b %Y"))
+    e.add_field(name="Created", value=discord.utils.format_dt(g.created_at, "D"))
+    e.add_field(name="Channels", value=len(g.channels))
+    e.add_field(name="Roles", value=len(g.roles))
     if g.icon:
         e.set_thumbnail(url=g.icon.url)
     await ctx.send(embed=e)
@@ -255,11 +164,11 @@ async def serverinfo(ctx):
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
-    e = embed("USER INFORMATION")
-    e.add_field(name="Username", value=str(member))
+    e = embed(str(member))
     e.add_field(name="ID", value=member.id)
-    e.add_field(name="Joined", value=member.joined_at.strftime("%d %b %Y") if member.joined_at else "Unknown")
-    e.add_field(name="Created", value=member.created_at.strftime("%d %b %Y"))
+    e.add_field(name="Joined", value=discord.utils.format_dt(member.joined_at, "D"))
+    e.add_field(name="Created", value=discord.utils.format_dt(member.created_at, "D"))
+    e.add_field(name="Top Role", value=member.top_role.mention)
     e.set_thumbnail(url=member.display_avatar.url)
     await ctx.send(embed=e)
 
@@ -272,481 +181,414 @@ async def avatar(ctx, member: discord.Member = None):
 
 @bot.command()
 async def support(ctx):
-    await ctx.send(
-        embed=embed(
-            "VEXORA SUPPORT",
-            f"[Join our support server]({SUPPORT_SERVER})"
-        )
-    )
+    await ctx.send(embed=embed(
+        "VEXORA Support",
+        f"[Join the support server]({SUPPORT_SERVER})"
+    ))
 
-
-# ==========================================
-# MODERATION
-# ==========================================
+# ================= MODERATION =================
 
 @bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    if member.top_role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
+        return await error(ctx, "You cannot ban someone with an equal or higher role.")
     await member.ban(reason=reason)
-    await success(ctx, f"{member} has been banned.\nReason: {reason}")
+    await success(ctx, f"Banned {member.mention}\nReason: {reason}")
 
-@bot.command()
+@bot.command(name="kick", aliases=["modkick"])
 @commands.has_permissions(kick_members=True)
-async def modkick(ctx, member: discord.Member, *, reason="No reason provided"):
+async def kick_member(ctx, member: discord.Member, *, reason="No reason provided"):
+    if member.top_role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
+        return await error(ctx, "You cannot kick someone with an equal or higher role.")
     await member.kick(reason=reason)
-    await success(ctx, f"{member} has been kicked.\nReason: {reason}")
+    await success(ctx, f"Kicked {member.mention}\nReason: {reason}")
 
 @bot.command()
 @commands.has_permissions(ban_members=True)
-async def unban(ctx, user_id: int):
+async def unban(ctx, *, user_id: int):
     user = await bot.fetch_user(user_id)
     await ctx.guild.unban(user)
-    await success(ctx, f"Unbanned {user}.")
+    await success(ctx, f"Unbanned **{user}**.")
 
 @bot.command()
 @commands.has_permissions(moderate_members=True)
 async def timeout(ctx, member: discord.Member, minutes: int, *, reason="No reason provided"):
     if minutes < 1 or minutes > 40320:
-        return await error(ctx, "Choose between 1 and 40320 minutes.")
-
-    await member.timeout(
-        datetime.timedelta(minutes=minutes),
-        reason=reason
-    )
-    await success(ctx, f"{member.mention} timed out for {minutes} minutes.")
+        return await error(ctx, "Choose a timeout between 1 minute and 28 days.")
+    await member.timeout(datetime.timedelta(minutes=minutes), reason=reason)
+    await success(ctx, f"Timed out {member.mention} for `{minutes}` minutes.")
 
 @bot.command()
 @commands.has_permissions(moderate_members=True)
 async def untimeout(ctx, member: discord.Member):
     await member.timeout(None)
-    await success(ctx, f"Timeout removed for {member.mention}.")
+    await success(ctx, f"Removed timeout from {member.mention}.")
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
     if amount < 1 or amount > 100:
-        return await error(ctx, "Choose between 1 and 100 messages.")
-
+        return await error(ctx, "Choose a number from 1 to 100.")
     deleted = await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(
-        embed=embed("PURGED", f"Deleted `{len(deleted) - 1}` messages.")
-    )
-    await asyncio.sleep(3)
+    msg = await ctx.send(embed=embed("Purged", f"Deleted `{len(deleted)-1}` messages."))
+    await asyncio.sleep(4)
     await msg.delete()
 
 @bot.command()
 @commands.has_permissions(manage_channels=True)
 async def lock(ctx):
-    await ctx.channel.set_permissions(
-        ctx.guild.default_role,
-        send_messages=False
-    )
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
     await success(ctx, "Channel locked.")
 
 @bot.command()
 @commands.has_permissions(manage_channels=True)
 async def unlock(ctx):
-    await ctx.channel.set_permissions(
-        ctx.guild.default_role,
-        send_messages=True
-    )
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=None)
     await success(ctx, "Channel unlocked.")
 
 @bot.command()
 @commands.has_permissions(manage_channels=True)
 async def slowmode(ctx, seconds: int):
-    if seconds < 0 or seconds > 21600:
-        return await error(ctx, "Choose 0–21600 seconds.")
-
+    if not 0 <= seconds <= 21600:
+        return await error(ctx, "Slowmode must be between 0 and 21600 seconds.")
     await ctx.channel.edit(slowmode_delay=seconds)
-    await success(ctx, f"Slowmode set to {seconds} seconds.")
+    await success(ctx, f"Slowmode set to `{seconds}` seconds.")
 
-
-# ==========================================
-# WARNINGS
-# ==========================================
+# ================= WARNINGS =================
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def warn(ctx, member: discord.Member, *, reason="No reason provided"):
-    execute(
-        "INSERT INTO warnings (guild_id,user_id,moderator_id,reason) VALUES (?,?,?,?)",
-        (ctx.guild.id, member.id, ctx.author.id, reason)
+    sql(
+        "INSERT INTO warnings(guild_id,user_id,moderator,reason,created) VALUES(?,?,?,?,?)",
+        (ctx.guild.id, member.id, ctx.author.id, reason, int(time.time()))
     )
     await success(ctx, f"{member.mention} has been warned.\nReason: {reason}")
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def warnings(ctx, member: discord.Member):
-    rows = fetchall(
-        "SELECT reason, moderator_id FROM warnings WHERE guild_id=? AND user_id=?",
+    rows = many(
+        "SELECT * FROM warnings WHERE guild_id=? AND user_id=? ORDER BY id DESC",
         (ctx.guild.id, member.id)
     )
-
-    e = embed(f"WARNINGS: {member}")
     if not rows:
-        e.description = "No warnings found."
-    else:
-        for i, row in enumerate(rows, 1):
-            e.add_field(
-                name=f"Warning {i}",
-                value=f"{row['reason']}\nModerator ID: {row['moderator_id']}",
-                inline=False
-            )
+        return await info(ctx, "No warnings found.")
+    e = embed(f"Warnings • {member}")
+    for r in rows[:10]:
+        e.add_field(
+            name=f"Warning #{r['id']}",
+            value=f"{r['reason']}\nModerator ID: `{r['moderator']}`",
+            inline=False
+        )
     await ctx.send(embed=e)
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def clearwarns(ctx, member: discord.Member):
-    execute(
-        "DELETE FROM warnings WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, member.id)
-    )
-    await success(ctx, f"Cleared warnings for {member}.")
+    sql("DELETE FROM warnings WHERE guild_id=? AND user_id=?",
+        (ctx.guild.id, member.id))
+    await success(ctx, f"Cleared warnings for {member.mention}.")
 
 @bot.command()
-@commands.has_permissions(manage_messages=True)
+@commands.has_permissions(manage_guild=True)
 async def staff(ctx):
-    members = [
-        m for m in ctx.guild.members
-        if m.guild_permissions.manage_messages
-        or m.guild_permissions.administrator
-    ]
+    members = [m.mention for m in ctx.guild.members if m.guild_permissions.manage_messages]
+    await ctx.send(embed=embed("Server Staff", "\n".join(members[:50]) or "No staff found."))
 
-    e = embed("SERVER STAFF")
-    e.description = "\n".join(m.mention for m in members[:50]) or "No staff found."
-    await ctx.send(embed=e)
-
-
-# ==========================================
-# PREMIUM MANAGEMENT
-# ==========================================
+# ================= PREMIUM MANAGEMENT =================
 
 @bot.group(invoke_without_command=True)
+@owner_only()
 async def premium(ctx):
-    active = await is_premium(ctx.guild.id)
-    await ctx.send(
-        embed=embed(
-            "PREMIUM STATUS",
-            "⭐ Premium is active." if active
-            else "Premium is not active on this server."
-        )
-    )
+    await info(ctx, "Use `!premium add`, `!premium remove`, `!premium check`, or `!premium list`.")
 
 @premium.command(name="add")
 @owner_only()
-async def premium_add(ctx, guild_id: int, days: int = 0):
-    if days < 0:
-        return await error(ctx, "Days cannot be negative.")
-
-    expires = 0 if days == 0 else int(time.time()) + days * 86400
-
-    execute(
-        "INSERT OR REPLACE INTO premium (guild_id,expires) VALUES (?,?)",
-        (guild_id, expires)
-    )
-    await success(
-        ctx,
-        f"Premium granted to server `{guild_id}`."
-        + (" Lifetime." if days == 0 else f" For {days} days.")
-    )
+async def premium_add(ctx, guild_id: int, days: int = 30):
+    expires = int(time.time()) + days * 86400
+    sql("INSERT OR REPLACE INTO premium(guild_id,expires) VALUES(?,?)",
+        (guild_id, expires))
+    await success(ctx, f"Premium enabled for `{guild_id}` for `{days}` days.")
 
 @premium.command(name="remove")
 @owner_only()
 async def premium_remove(ctx, guild_id: int):
-    execute("DELETE FROM premium WHERE guild_id=?", (guild_id,))
+    sql("DELETE FROM premium WHERE guild_id=?", (guild_id,))
     await success(ctx, f"Premium removed from `{guild_id}`.")
 
 @premium.command(name="check")
 @owner_only()
 async def premium_check(ctx, guild_id: int):
-    active = await is_premium(guild_id)
-    await info(ctx, f"Server `{guild_id}` premium: `{active}`")
+    await info(ctx, f"Premium status: **{'Active' if is_premium(guild_id) else 'Inactive'}**")
 
 @premium.command(name="list")
 @owner_only()
 async def premium_list(ctx):
-    rows = fetchall("SELECT guild_id, expires FROM premium")
+    rows = many("SELECT * FROM premium")
+    text = "\n".join(f"`{r['guild_id']}` — <t:{r['expires']}:R>" for r in rows)
+    await ctx.send(embed=embed("Premium Servers", text or "No premium servers."))
 
-    e = embed("PREMIUM SERVERS")
-    if not rows:
-        e.description = "No premium servers."
-    else:
-        for row in rows:
-            expiry = "Lifetime" if row["expires"] == 0 else f"<t:{row['expires']}:R>"
-            e.add_field(
-                name=str(row["guild_id"]),
-                value=expiry,
-                inline=False
-            )
-    await ctx.send(embed=e)
+# ================= ECONOMY =================
 
-
-# ==========================================
-# ECONOMY
-# ==========================================
-
-@bot.command()
+@bot.command(aliases=["bal"])
 async def balance(ctx, member: discord.Member = None):
     member = member or ctx.author
     amount = get_balance(member.id)
-    await ctx.send(
-        embed=embed("VEX BALANCE", f"{member.mention} has **{amount} VEX**.")
-    )
+    await ctx.send(embed=embed("Wallet", f"{member.mention} has **{amount} coins**."))
 
 @bot.command()
 @commands.cooldown(1, 86400, commands.BucketType.user)
 async def daily(ctx):
-    row = fetchone(
-        "SELECT daily FROM economy WHERE user_id=?",
-        (ctx.author.id,)
-    )
+    reward = random.randint(100, 300)
     get_balance(ctx.author.id)
-
-    reward = 250
-    execute(
-        "UPDATE economy SET balance=balance+?, daily=? WHERE user_id=?",
-        (reward, int(time.time()), ctx.author.id)
-    )
-    await success(ctx, f"You collected **{reward} VEX** daily.")
+    sql("UPDATE economy SET balance=balance+?,daily=? WHERE user_id=?",
+        (reward, int(time.time()), ctx.author.id))
+    await success(ctx, f"You collected **{reward} coins**.")
 
 @bot.command()
 @commands.cooldown(1, 604800, commands.BucketType.user)
 async def weekly(ctx):
+    reward = random.randint(500, 1000)
     get_balance(ctx.author.id)
-    reward = 1000
-    execute(
-        "UPDATE economy SET balance=balance+?, weekly=? WHERE user_id=?",
-        (reward, int(time.time()), ctx.author.id)
-    )
-    await success(ctx, f"You collected **{reward} VEX** weekly.")
+    sql("UPDATE economy SET balance=balance+?,weekly=? WHERE user_id=?",
+        (reward, int(time.time()), ctx.author.id))
+    await success(ctx, f"You collected **{reward} coins**.")
 
 @bot.command()
-@commands.cooldown(1, 60, commands.BucketType.user)
+@commands.cooldown(1, 3600, commands.BucketType.user)
 async def work(ctx):
-    reward = random.randint(30, 100)
+    reward = random.randint(50, 150)
     get_balance(ctx.author.id)
-    execute(
-        "UPDATE economy SET balance=balance+? WHERE user_id=?",
-        (reward, ctx.author.id)
-    )
-    await success(ctx, f"You worked and earned **{reward} VEX**.")
+    sql("UPDATE economy SET balance=balance+? WHERE user_id=?",
+        (reward, ctx.author.id))
+    await success(ctx, f"You worked and earned **{reward} coins**.")
 
 @bot.command()
-@commands.cooldown(1, 30, commands.BucketType.user)
+@commands.cooldown(1, 1800, commands.BucketType.user)
 async def beg(ctx):
-    reward = random.randint(5, 30)
+    reward = random.randint(0, 50)
     get_balance(ctx.author.id)
-    execute(
-        "UPDATE economy SET balance=balance+? WHERE user_id=?",
-        (reward, ctx.author.id)
-    )
-    await success(ctx, f"Someone gave you **{reward} VEX**.")
+    sql("UPDATE economy SET balance=balance+? WHERE user_id=?",
+        (reward, ctx.author.id))
+    await info(ctx, f"You received **{reward} coins**.")
 
 @bot.command()
 async def pay(ctx, member: discord.Member, amount: int):
+    if member.bot or member == ctx.author:
+        return await error(ctx, "Choose another human member.")
     if amount <= 0:
         return await error(ctx, "Amount must be positive.")
-
-    if member.bot or member.id == ctx.author.id:
-        return await error(ctx, "Choose another member.")
-
-    get_balance(ctx.author.id)
+    if get_balance(ctx.author.id) < amount:
+        return await error(ctx, "You don't have enough coins.")
     get_balance(member.id)
+    sql("UPDATE economy SET balance=balance-? WHERE user_id=?",
+        (amount, ctx.author.id))
+    sql("UPDATE economy SET balance=balance+? WHERE user_id=?",
+        (amount, member.id))
+    await success(ctx, f"Sent **{amount} coins** to {member.mention}.")
 
-    db.execute("BEGIN IMMEDIATE")
-    try:
-        sender = db.execute(
-            "SELECT balance FROM economy WHERE user_id=?",
-            (ctx.author.id,)
-        ).fetchone()
+@bot.command(name="leaderboard")
+async def economy_leaderboard(ctx):
+    rows = many("SELECT user_id,balance FROM economy ORDER BY balance DESC LIMIT 10")
+    lines = []
+    for i, r in enumerate(rows, 1):
+        lines.append(f"`{i}.` <@{r['user_id']}> — **{r['balance']} coins**")
+    await ctx.send(embed=embed("Economy Leaderboard", "\n".join(lines) or "No data."))
 
-        if sender["balance"] < amount:
-            db.rollback()
-            return await error(ctx, "You don't have enough VEX.")
-
-        db.execute(
-            "UPDATE economy SET balance=balance-? WHERE user_id=?",
-            (amount, ctx.author.id)
-        )
-        db.execute(
-            "UPDATE economy SET balance=balance+? WHERE user_id=?",
-            (amount, member.id)
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    await success(ctx, f"Sent **{amount} VEX** to {member.mention}.")
-
-@bot.command()
-async def leaderboard(ctx):
-    rows = fetchall(
-        "SELECT user_id,balance FROM economy ORDER BY balance DESC LIMIT 10"
-    )
-
-    e = embed("VEX LEADERBOARD")
-    e.description = "\n".join(
-        f"**{i}.** <@{r['user_id']}> — {r['balance']} VEX"
-        for i, r in enumerate(rows, 1)
-    ) or "No users yet."
-
-    await ctx.send(embed=e)
-
-
-# ==========================================
-# SIMPLE GAMES
-# ==========================================
+# ================= GAMES =================
 
 @bot.command()
 async def dice(ctx):
-    result = random.randint(1, 6)
-    await ctx.send(embed=embed("DICE", f"🎲 You rolled **{result}**!"))
+    await info(ctx, f"🎲 You rolled **{random.randint(1,6)}**.")
 
 @bot.command()
 async def flip(ctx):
-    result = random.choice(["Heads", "Tails"])
-    await ctx.send(embed=embed("COIN FLIP", f"🪙 **{result}**"))
+    await info(ctx, random.choice(["🪙 Heads!", "🪙 Tails!"]))
 
 @bot.command()
 async def rps(ctx, choice: str):
     choice = choice.lower()
     options = ["rock", "paper", "scissors"]
-
     if choice not in options:
-        return await error(ctx, "Choose rock, paper or scissors.")
-
+        return await error(ctx, "Choose rock, paper, or scissors.")
     bot_choice = random.choice(options)
-
     if choice == bot_choice:
         result = "It's a tie!"
-    elif (
-        (choice == "rock" and bot_choice == "scissors")
-        or (choice == "paper" and bot_choice == "rock")
-        or (choice == "scissors" and bot_choice == "paper")
-    ):
+    elif (choice, bot_choice) in [
+        ("rock", "scissors"), ("paper", "rock"), ("scissors", "paper")
+    ]:
         result = "You win!"
     else:
         result = "I win!"
+    await info(ctx, f"You: **{choice}**\nMe: **{bot_choice}**\n\n{result}")
 
-    await ctx.send(
-        embed=embed(
-            "ROCK PAPER SCISSORS",
-            f"You: **{choice}**\nVEXORA: **{bot_choice}**\n\n{result}"
-        )
-    )
+@bot.command()
+async def guess(ctx, number: int):
+    target = random.randint(1, 10)
+    if number == target:
+        await success(ctx, "Correct! You guessed it.")
+    else:
+        await info(ctx, f"Not quite! The number was `{target}`.")
 
+@bot.command()
+async def trivia(ctx):
+    questions = [
+        ("What is the capital of Japan?", "tokyo"),
+        ("Which planet is known as the Red Planet?", "mars"),
+        ("How many sides does a hexagon have?", "6"),
+        ("What is the largest ocean?", "pacific"),
+    ]
+    question, answer = random.choice(questions)
+    await ctx.send(embed=embed("Trivia", question))
 
-# ==========================================
-# REPUTATION
-# ==========================================
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    try:
+        msg = await bot.wait_for("message", timeout=20, check=check)
+        if msg.content.lower().strip() == answer:
+            await success(ctx, "Correct answer!")
+        else:
+            await info(ctx, f"The answer was **{answer}**.")
+    except asyncio.TimeoutError:
+        await info(ctx, f"Time's up! The answer was **{answer}**.")
+
+# ================= REPUTATION =================
 
 @bot.command()
 async def rep(ctx, member: discord.Member):
-    if member.bot or member.id == ctx.author.id:
+    if member == ctx.author or member.bot:
         return await error(ctx, "You cannot give reputation to yourself or a bot.")
-
-    execute(
-        "INSERT OR IGNORE INTO reputation (guild_id,user_id,reps) VALUES (?,?,0)",
-        (ctx.guild.id, member.id)
-    )
-
-    execute(
-        "UPDATE reputation SET reps=reps+1 WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, member.id)
-    )
-    await success(ctx, f"Gave reputation to {member.mention}.")
+    row = one("SELECT reps FROM reputation WHERE user_id=?", (member.id,))
+    if not row:
+        sql("INSERT INTO reputation(user_id,reps) VALUES(?,1)", (member.id,))
+    else:
+        sql("UPDATE reputation SET reps=reps+1 WHERE user_id=?", (member.id,))
+    await success(ctx, f"You gave a reputation point to {member.mention}.")
 
 @bot.command()
 async def reps(ctx, member: discord.Member = None):
     member = member or ctx.author
-
-    row = fetchone(
-        "SELECT reps FROM reputation WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, member.id)
-    )
-
+    row = one("SELECT reps FROM reputation WHERE user_id=?", (member.id,))
     amount = row["reps"] if row else 0
-    await info(ctx, f"{member.mention} has **{amount} reputation**.")
+    await info(ctx, f"{member.mention} has **{amount} reputation points**.")
 
+@bot.command()
+async def repboard(ctx):
+    rows = many("SELECT user_id,reps FROM reputation ORDER BY reps DESC LIMIT 10")
+    lines = [f"`{i}.` <@{r['user_id']}> — **{r['reps']}**" for i, r in enumerate(rows, 1)]
+    await ctx.send(embed=embed("Reputation Leaderboard", "\n".join(lines) or "No data."))
 
-# ==========================================
-# LEVEL SYSTEM
-# ==========================================
+# ================= LEVELS =================
 
-@bot.listen("on_message")
-async def level_listener(message):
-    if message.author.bot or not message.guild:
+@bot.event
+async def on_message(message):
+    if message.author.bot:
         return
-
-    row = fetchone(
-        "SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
-        (message.guild.id, message.author.id)
-    )
-
-    if not row:
-        execute(
-            "INSERT INTO levels (guild_id,user_id,xp,level) VALUES (?,?,0,0)",
+    if message.guild:
+        row = one(
+            "SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
             (message.guild.id, message.author.id)
         )
-        xp = 0
-        level = 0
-    else:
-        xp = row["xp"]
-        level = row["level"]
-
-    xp += random.randint(5, 15)
-    needed = (level + 1) * 100
-
-    if xp >= needed:
-        xp -= needed
-        level += 1
-        await message.channel.send(
-            embed=embed(
-                "LEVEL UP!",
-                f"{message.author.mention} reached level **{level}**!"
-            )
-        )
-
-    execute(
-        "UPDATE levels SET xp=?,level=? WHERE guild_id=? AND user_id=?",
-        (xp, level, message.guild.id, message.author.id)
-    )
+        gained = random.randint(5, 15)
+        if not row:
+            sql("INSERT INTO levels(guild_id,user_id,xp,level) VALUES(?,?,?,0)",
+                (message.guild.id, message.author.id, gained))
+        else:
+            xp = row["xp"] + gained
+            level = row["level"]
+            needed = (level + 1) * 100
+            while xp >= needed:
+                xp -= needed
+                level += 1
+                needed = (level + 1) * 100
+                try:
+                    await message.channel.send(
+                        embed=embed("Level Up!", f"{message.author.mention} reached level **{level}**!")
+                    )
+                except discord.HTTPException:
+                    pass
+            sql("UPDATE levels SET xp=?,level=? WHERE guild_id=? AND user_id=?",
+                (xp, level, message.guild.id, message.author.id))
+    await bot.process_commands(message)
 
 @bot.command()
 async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
-
-    row = fetchone(
-        "SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, member.id)
-    )
-
-    xp = row["xp"] if row else 0
-    level = row["level"] if row else 0
-
-    await ctx.send(
-        embed=embed(
-            "RANK CARD",
-            f"**{member.display_name}**\nLevel: `{level}`\nXP: `{xp}/{(level + 1) * 100}`"
-        )
-    )
+    row = one("SELECT xp,level FROM levels WHERE guild_id=? AND user_id=?",
+              (ctx.guild.id, member.id))
+    if not row:
+        return await info(ctx, "No level data yet.")
+    needed = (row["level"] + 1) * 100
+    await ctx.send(embed=embed(
+        f"{member.display_name}'s Rank",
+        f"Level: **{row['level']}**\nXP: **{row['xp']}/{needed}**"
+    ))
 
 @bot.command()
 async def level(ctx, member: discord.Member = None):
-    await rank.callback(ctx, member)
-    
-# ==========================================
-# AFK SYSTEM
-# ==========================================
+    await rank(ctx, member)
+
+@bot.command()
+async def levels(ctx):
+    rows = many(
+        "SELECT user_id,level,xp FROM levels WHERE guild_id=? ORDER BY level DESC,xp DESC LIMIT 10",
+        (ctx.guild.id,)
+    )
+    lines = [
+        f"`{i}.` <@{r['user_id']}> — Level **{r['level']}** ({r['xp']} XP)"
+        for i, r in enumerate(rows, 1)
+    ]
+    await ctx.send(embed=embed("Server Level Leaderboard", "\n".join(lines) or "No data."))
+    # ================= EXTRA DATABASE TABLES =================
+
+extra_tables = [
+    """CREATE TABLE IF NOT EXISTS giveaways
+    (message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,
+    prize TEXT, end_time INTEGER, ended INTEGER DEFAULT 0)""",
+
+    """CREATE TABLE IF NOT EXISTS tickets
+    (channel_id INTEGER PRIMARY KEY, guild_id INTEGER, user_id INTEGER,
+    claimed_by INTEGER DEFAULT 0)""",
+
+    """CREATE TABLE IF NOT EXISTS invite_counts
+    (guild_id INTEGER, user_id INTEGER, count INTEGER DEFAULT 0,
+    PRIMARY KEY(guild_id,user_id))""",
+
+    """CREATE TABLE IF NOT EXISTS invite_tracking
+    (guild_id INTEGER, member_id INTEGER, inviter_id INTEGER,
+    PRIMARY KEY(guild_id,member_id))"""
+]
+
+for table in extra_tables:
+    db.execute(table)
+db.commit()
+
+# ================= SETTINGS =================
+
+def set_setting(guild_id, name, value):
+    sql(
+        "INSERT OR REPLACE INTO settings(guild_id,name,value) VALUES(?,?,?)",
+        (guild_id, name, str(value))
+    )
+
+def get_setting(guild_id, name):
+    row = one(
+        "SELECT value FROM settings WHERE guild_id=? AND name=?",
+        (guild_id, name)
+    )
+    return row["value"] if row else None
+
+# ================= AFK =================
 
 afk_users = {}
 
 @bot.command()
 async def afk(ctx, *, reason="AFK"):
     afk_users[ctx.author.id] = reason
-    await success(ctx, f"You are now AFK: {reason}")
+    await success(ctx, f"AFK enabled: **{reason}**")
 
 @bot.listen("on_message")
 async def afk_listener(message):
@@ -757,807 +599,654 @@ async def afk_listener(message):
         afk_users.pop(message.author.id, None)
         try:
             await message.channel.send(
-                embed=embed("WELCOME BACK", f"{message.author.mention}, your AFK status was removed.")
+                embed=embed("Welcome Back", f"{message.author.mention}, your AFK status was removed.")
             )
         except discord.HTTPException:
             pass
 
-    for user in message.mentions:
-        if user.id in afk_users:
-            await message.channel.send(
-                embed=embed("AFK USER", f"{user.mention} is AFK: {afk_users[user.id]}")
-            )
+    for member in message.mentions:
+        if member.id in afk_users:
+            try:
+                await message.channel.send(
+                    embed=embed("AFK", f"{member.mention} is AFK: **{afk_users[member.id]}**")
+                )
+            except discord.HTTPException:
+                pass
 
-
-# ==========================================
-# CONFESSIONS
-# ==========================================
-
-db.executescript("""
-CREATE TABLE IF NOT EXISTS confessions (
-    guild_id INTEGER PRIMARY KEY,
-    channel_id INTEGER
-);
-CREATE TABLE IF NOT EXISTS suggestions (
-    guild_id INTEGER PRIMARY KEY,
-    channel_id INTEGER
-);
-""")
-db.commit()
+# ================= CONFESSIONS =================
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def confesssetup(ctx, channel: discord.TextChannel):
-    execute(
-        "INSERT OR REPLACE INTO confessions VALUES (?,?)",
-        (ctx.guild.id, channel.id)
-    )
+    set_setting(ctx.guild.id, "confessions", channel.id)
     await success(ctx, f"Confessions channel set to {channel.mention}.")
 
 @bot.command()
 async def confess(ctx, *, message):
-    row = fetchone(
-        "SELECT channel_id FROM confessions WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-    if not row:
-        return await error(ctx, "Confessions are not configured.")
-
-    channel = ctx.guild.get_channel(row["channel_id"])
+    channel_id = get_setting(ctx.guild.id, "confessions")
+    if not channel_id:
+        return await error(ctx, "Confessions have not been configured.")
+    channel = ctx.guild.get_channel(int(channel_id))
     if not channel:
-        return await error(ctx, "Configured channel no longer exists.")
+        return await error(ctx, "The confession channel no longer exists.")
 
-    e = embed("ANONYMOUS CONFESSION", message)
-    e.add_field(name="Server", value=ctx.guild.name)
+    e = embed("Anonymous Confession", message)
+    e.add_field(name="Submitted", value="Anonymous")
     await channel.send(embed=e)
     await success(ctx, "Your confession was submitted.")
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def confessionsoff(ctx):
-    execute("DELETE FROM confessions WHERE guild_id=?", (ctx.guild.id,))
+    set_setting(ctx.guild.id, "confessions", "")
     await success(ctx, "Confessions disabled.")
 
-
-# ==========================================
-# SUGGESTIONS
-# ==========================================
+# ================= SUGGESTIONS =================
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def suggestsetup(ctx, channel: discord.TextChannel):
-    execute(
-        "INSERT OR REPLACE INTO suggestions VALUES (?,?)",
-        (ctx.guild.id, channel.id)
-    )
+    set_setting(ctx.guild.id, "suggestions", channel.id)
     await success(ctx, f"Suggestions channel set to {channel.mention}.")
 
 @bot.command()
-async def suggest(ctx, *, message):
-    row = fetchone(
-        "SELECT channel_id FROM suggestions WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-    if not row:
-        return await error(ctx, "Suggestions are not configured.")
-
-    channel = ctx.guild.get_channel(row["channel_id"])
+async def suggest(ctx, *, suggestion):
+    channel_id = get_setting(ctx.guild.id, "suggestions")
+    if not channel_id:
+        return await error(ctx, "Suggestions have not been configured.")
+    channel = ctx.guild.get_channel(int(channel_id))
     if not channel:
-        return await error(ctx, "Suggestion channel not found.")
+        return await error(ctx, "The suggestions channel no longer exists.")
 
-    e = embed("NEW SUGGESTION", message)
-    e.add_field(name="Suggested by", value=ctx.author.mention)
+    e = embed("New Suggestion", suggestion)
+    e.add_field(name="Submitted by", value=ctx.author.mention)
     msg = await channel.send(embed=e)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
     await success(ctx, "Suggestion submitted.")
 
-
-# ==========================================
-# POLLS
-# ==========================================
+# ================= POLLS =================
 
 @bot.command()
 async def poll(ctx, *, question):
-    e = embed("📊 POLL", question)
+    e = embed("📊 Poll", question)
     msg = await ctx.send(embed=e)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
 
-
-# ==========================================
-# ANIME FUN COMMANDS
-# ==========================================
+# ================= ANIME FUN =================
 
 ANIME_GIFS = {
     "kiss": [
-        "https://klipy.com/gifs/shirayuki-zen-kiss-anime",
-        "https://klipy.com/gifs/hells-paradise-yui"
+        "https://media.tenor.com/4J7b7qz5v0AAAAAC/anime-kiss.gif",
+        "https://media.tenor.com/0nZ6q0p4Z2AAAAAC/anime-kiss.gif"
     ],
     "punch": [
-        "https://klipy.com/gifs/anime-punch-28",
-        "https://klipy.com/gifs/spy-x-family-anya-forger-51"
+        "https://media.tenor.com/7l9Y2q2Z0JAAAAAC/anime-punch.gif"
     ],
     "kick": [
-        "https://klipy.com/gifs/asdf-movie-20",
-        "https://klipy.com/gifs/kick-angry-3"
+        "https://media.tenor.com/2e3Q6Qx4vWAAAAAC/anime-kick.gif"
     ]
 }
 
-async def anime_action(ctx, member, action):
+async def anime_action(ctx, action, member):
+    if member.bot:
+        return await error(ctx, "Choose a human member.")
     gif = random.choice(ANIME_GIFS[action])
-    e = embed(
-        f"{action.upper()}!",
-        f"{ctx.author.mention} {action}s {member.mention}!\n[View anime GIF]({gif})"
-    )
+    e = embed(f"Anime {action.title()}", f"{ctx.author.mention} {action}s {member.mention}!")
+    e.set_image(url=gif)
     await ctx.send(embed=e)
 
 @bot.command()
 async def kiss(ctx, member: discord.Member):
-    await anime_action(ctx, member, "kiss")
+    await anime_action(ctx, "kiss", member)
 
 @bot.command()
 async def punch(ctx, member: discord.Member):
-    await anime_action(ctx, member, "punch")
+    await anime_action(ctx, "punch", member)
 
 @bot.command()
 async def kick(ctx, member: discord.Member):
-    await anime_action(ctx, member, "kick")
+    await anime_action(ctx, "kick", member)
 
+# ================= CUSTOM COMMANDS: PREMIUM =================
 
-# ==========================================
-# GIVEAWAYS
-# ==========================================
+@bot.group(name="cc", invoke_without_command=True)
+async def cc(ctx):
+    await info(ctx, "Premium custom commands:\n`!cc add <name> <response>`\n`!cc edit <name> <response>`\n`!cc remove <name>`\n`!cc list`\n`!cc info <name>`")
 
-db.executescript("""
-CREATE TABLE IF NOT EXISTS giveaways (
-    message_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    channel_id INTEGER,
-    prize TEXT,
-    winners INTEGER,
-    end_time INTEGER,
-    ended INTEGER DEFAULT 0
-);
-""")
-db.commit()
+def valid_cc_name(name):
+    return bool(re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", name))
 
-giveaway_tasks = {}
+@cc.command(name="add")
+@commands.has_permissions(manage_guild=True)
+async def cc_add(ctx, name: str, *, response: str):
+    if not is_premium(ctx.guild.id):
+        return await error(ctx, "This server needs Premium.")
+    if not valid_cc_name(name):
+        return await error(ctx, "Use a command name with letters, numbers, _ or - (max 32 characters).")
+    if one("SELECT name FROM custom_commands WHERE guild_id=? AND name=?",
+           (ctx.guild.id, name.lower())):
+        return await error(ctx, "That custom command already exists.")
+    sql("INSERT INTO custom_commands(guild_id,name,response) VALUES(?,?,?)",
+        (ctx.guild.id, name.lower(), response))
+    await success(ctx, f"Custom command `!{name.lower()}` created.")
 
-def parse_duration(value):
-    match = re.fullmatch(r"(\d+)([smhd])", value.lower())
-    if not match:
-        return None
-
-    amount = int(match.group(1))
-    unit = match.group(2)
-
-    seconds = amount * {
-        "s": 1,
-        "m": 60,
-        "h": 3600,
-        "d": 86400
-    }[unit]
-
-    if seconds < 10 or seconds > 2592000:
-        return None
-
-    return seconds
-
-async def finish_giveaway(message_id):
-    row = fetchone(
-        "SELECT * FROM giveaways WHERE message_id=? AND ended=0",
-        (message_id,)
-    )
+@cc.command(name="edit")
+@commands.has_permissions(manage_guild=True)
+async def cc_edit(ctx, name: str, *, response: str):
+    if not is_premium(ctx.guild.id):
+        return await error(ctx, "This server needs Premium.")
+    row = one("SELECT name FROM custom_commands WHERE guild_id=? AND name=?",
+              (ctx.guild.id, name.lower()))
     if not row:
+        return await error(ctx, "Custom command not found.")
+    sql("UPDATE custom_commands SET response=? WHERE guild_id=? AND name=?",
+        (response, ctx.guild.id, name.lower()))
+    await success(ctx, f"Updated `!{name.lower()}`.")
+
+@cc.command(name="remove")
+@commands.has_permissions(manage_guild=True)
+async def cc_remove(ctx, name: str):
+    if not is_premium(ctx.guild.id):
+        return await error(ctx, "This server needs Premium.")
+    sql("DELETE FROM custom_commands WHERE guild_id=? AND name=?",
+        (ctx.guild.id, name.lower()))
+    await success(ctx, f"Removed `!{name.lower()}`.")
+
+@cc.command(name="list")
+async def cc_list(ctx):
+    rows = many("SELECT name FROM custom_commands WHERE guild_id=?",
+                (ctx.guild.id,))
+    names = [f"`{r['name']}`" for r in rows]
+    await ctx.send(embed=embed("Custom Commands", "\n".join(names) or "No custom commands."))
+
+@cc.command(name="info")
+async def cc_info(ctx, name: str):
+    row = one("SELECT response FROM custom_commands WHERE guild_id=? AND name=?",
+              (ctx.guild.id, name.lower()))
+    if not row:
+        return await error(ctx, "Custom command not found.")
+    await ctx.send(embed=embed(f"Custom Command: {name}", row["response"][:4000]))
+
+@bot.listen("on_message")
+async def custom_command_listener(message):
+    if message.author.bot or not message.guild:
+        return
+    if not is_premium(message.guild.id):
         return
 
-    channel = bot.get_channel(row["channel_id"])
-    if not channel:
+    prefixes = ("!", "?", ".", "$", "-")
+    content = message.content.strip()
+
+    if not content.startswith(prefixes):
         return
 
-    try:
-        msg = await channel.fetch_message(message_id)
-        users = [
-            user async for user in msg.reactions[0].users()
-            if not user.bot
-        ]
+    parts = content[1:].split(maxsplit=1)
+    if not parts:
+        return
 
-        winners = random.sample(
-            users,
-            min(len(users), row["winners"])
-        ) if users else []
+    name = parts[0].lower()
 
-        winner_text = ", ".join(w.mention for w in winners) if winners else "No valid entries."
+    # Avoid overriding actual bot commands.
+    if bot.get_command(name):
+        return
 
-        e = embed("GIVEAWAY ENDED", f"Prize: **{row['prize']}**\nWinners: {winner_text}")
-        await channel.send(embed=e)
-
-    except discord.HTTPException:
-        pass
-
-    execute(
-        "UPDATE giveaways SET ended=1 WHERE message_id=?",
-        (message_id,)
+    row = one(
+        "SELECT response FROM custom_commands WHERE guild_id=? AND name=?",
+        (message.guild.id, name)
     )
-
-async def giveaway_timer(message_id, end_time):
-    await asyncio.sleep(max(0, end_time - int(time.time())))
-    await finish_giveaway(message_id)
-    giveaway_tasks.pop(message_id, None)
-
-@bot.command()
-@commands.has_permissions(manage_guild=True)
-async def gstart(ctx, duration: str, winners: int, *, prize):
-    seconds = parse_duration(duration)
-
-    if not seconds:
-        return await error(ctx, "Use 10s, 5m, 2h or 1d. Maximum 30 days.")
-
-    if winners < 1 or winners > 20:
-        return await error(ctx, "Choose 1–20 winners.")
-
-    end_time = int(time.time()) + seconds
-
-    e = embed(
-        "🎉 GIVEAWAY",
-        f"Prize: **{prize}**\nWinners: `{winners}`\nEnds: <t:{end_time}:R>\nReact with 🎉 to enter!"
-    )
-
-    msg = await ctx.send(embed=e)
-    await msg.add_reaction("🎉")
-
-    execute(
-        "INSERT INTO giveaways (message_id,guild_id,channel_id,prize,winners,end_time) VALUES (?,?,?,?,?,?)",
-        (msg.id, ctx.guild.id, ctx.channel.id, prize, winners, end_time)
-    )
-
-    giveaway_tasks[msg.id] = asyncio.create_task(
-        giveaway_timer(msg.id, end_time)
-    )
-
-@bot.command()
-@commands.has_permissions(manage_guild=True)
-async def gend(ctx, message_id: int):
-    task = giveaway_tasks.pop(message_id, None)
-    if task:
-        task.cancel()
-    await finish_giveaway(message_id)
-
-@bot.command()
-@commands.has_permissions(manage_guild=True)
-async def gcancel(ctx, message_id: int):
-    execute(
-        "UPDATE giveaways SET ended=1 WHERE message_id=?",
-        (message_id,)
-    )
-    task = giveaway_tasks.pop(message_id, None)
-    if task:
-        task.cancel()
-    await success(ctx, "Giveaway cancelled.")
-
-@bot.command()
-@commands.has_permissions(manage_guild=True)
-async def greroll(ctx, message_id: int):
-    row = fetchone(
-        "SELECT * FROM giveaways WHERE message_id=? AND ended=1",
-        (message_id,)
-    )
-    if not row:
-        return await error(ctx, "Ended giveaway not found.")
-
-    channel = bot.get_channel(row["channel_id"])
-    if not channel:
-        return await error(ctx, "Channel not found.")
-
-    try:
-        msg = await channel.fetch_message(message_id)
-        users = [
-            user async for user in msg.reactions[0].users()
-            if not user.bot
-        ]
-        if not users:
-            return await error(ctx, "No eligible entries.")
-
-        winner = random.choice(users)
-        await channel.send(
-            embed=embed("GIVEAWAY REROLL", f"New winner: {winner.mention}")
+    if row:
+        await message.channel.send(
+            row["response"].replace("{user}", message.author.mention)
+            .replace("{server}", message.guild.name)[:2000]
         )
-    except discord.HTTPException:
-        await error(ctx, "Could not retrieve giveaway entries.")
 
-
-# ==========================================
-# INVITE TRACKING
-# ==========================================
-
-db.executescript("""
-CREATE TABLE IF NOT EXISTS invites (
-    guild_id INTEGER,
-    user_id INTEGER,
-    inviter_id INTEGER
-);
-""")
-db.commit()
+# ================= INVITES =================
 
 invite_cache = {}
 
 @bot.event
 async def on_ready():
-    print(f"VEXORA ready: {bot.user}")
-
+    print(f"VEXORA online as {bot.user}")
     for guild in bot.guilds:
         try:
-            invite_cache[guild.id] = {
-                inv.code: inv.uses
-                for inv in await guild.invites()
-            }
+            invite_cache[guild.id] = await guild.invites()
         except discord.Forbidden:
-            pass
+            invite_cache[guild.id] = []
 
-    for row in fetchall("SELECT message_id,end_time FROM giveaways WHERE ended=0"):
-        if row["message_id"] not in giveaway_tasks:
-            giveaway_tasks[row["message_id"]] = asyncio.create_task(
-                giveaway_timer(row["message_id"], row["end_time"])
-            )
+    await restore_giveaways()
 
-@bot.event
-async def on_invite_create(invite):
+@bot.listen("on_invite_create")
+async def invite_created(invite):
     try:
-        invite_cache[invite.guild.id] = {
-            inv.code: inv.uses
-            for inv in await invite.guild.invites()
-        }
+        invite_cache[invite.guild.id] = await invite.guild.invites()
     except discord.Forbidden:
         pass
 
-@bot.event
-async def on_member_join(member):
+@bot.listen("on_invite_delete")
+async def invite_deleted(invite):
     try:
-        invites = await member.guild.invites()
-        old = invite_cache.get(member.guild.id, {})
-        used = next(
-            (inv for inv in invites if inv.uses > old.get(inv.code, 0)),
-            None
-        )
+        invite_cache[invite.guild.id] = await invite.guild.invites()
+    except discord.Forbidden:
+        pass
 
-        invite_cache[member.guild.id] = {
-            inv.code: inv.uses for inv in invites
-        }
+@bot.listen("on_member_join")
+async def invite_join(member):
+    guild = member.guild
+    try:
+        current = await guild.invites()
+        old = invite_cache.get(guild.id, [])
+        used = None
+
+        for invite in current:
+            previous = next((x for x in old if x.code == invite.code), None)
+            if previous and invite.uses > previous.uses:
+                used = invite
+                break
+
+        invite_cache[guild.id] = current
 
         if used and used.inviter:
-            execute(
-                "INSERT INTO invites (guild_id,user_id,inviter_id) VALUES (?,?,?)",
-                (member.guild.id, member.id, used.inviter.id)
+            inviter = used.inviter
+            sql(
+                """INSERT INTO invite_counts(guild_id,user_id,count)
+                VALUES(?,?,1)
+                ON CONFLICT(guild_id,user_id)
+                DO UPDATE SET count=count+1""",
+                (guild.id, inviter.id)
+            )
+            sql(
+                "INSERT OR REPLACE INTO invite_tracking(guild_id,member_id,inviter_id) VALUES(?,?,?)",
+                (guild.id, member.id, inviter.id)
             )
     except discord.Forbidden:
         pass
 
-@bot.command(name="invites", aliases=["i", "I", "lb"])
+@bot.command(name="invites", aliases=["i", "lb"])
 async def invites(ctx, member: discord.Member = None):
     member = member or ctx.author
-
-    row = fetchone(
-        "SELECT COUNT(*) AS total FROM invites WHERE guild_id=? AND inviter_id=?",
-        (ctx.guild.id, member.id)
-    )
-
-    await info(ctx, f"{member.mention} has `{row['total']}` tracked invites.")
+    row = one("SELECT count FROM invite_counts WHERE guild_id=? AND user_id=?",
+              (ctx.guild.id, member.id))
+    count = row["count"] if row else 0
+    await info(ctx, f"{member.mention} has **{count} tracked invites**.")
 
 @bot.command()
-async def inviter(ctx, member: discord.Member):
-    row = fetchone(
-        "SELECT inviter_id FROM invites WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, member.id)
-    )
-
+async def inviter(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    row = one("SELECT inviter_id FROM invite_tracking WHERE guild_id=? AND member_id=?",
+              (ctx.guild.id, member.id))
     if not row:
-        return await info(ctx, "Inviter not found.")
-
+        return await info(ctx, "No inviter was recorded.")
     await info(ctx, f"{member.mention} was invited by <@{row['inviter_id']}>.")
 
 @bot.command()
+async def inviteinfo(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    row = one("SELECT count FROM invite_counts WHERE guild_id=? AND user_id=?",
+              (ctx.guild.id, member.id))
+    count = row["count"] if row else 0
+    await info(ctx, f"Invite information for {member.mention}\nTracked invites: **{count}**")
+
+@bot.command()
 async def topinvites(ctx):
-    rows = fetchall(
-        "SELECT inviter_id,COUNT(*) AS total FROM invites WHERE guild_id=? GROUP BY inviter_id ORDER BY total DESC LIMIT 10",
+    rows = many(
+        "SELECT user_id,count FROM invite_counts WHERE guild_id=? ORDER BY count DESC LIMIT 10",
         (ctx.guild.id,)
     )
+    lines = [f"`{i}.` <@{r['user_id']}> — **{r['count']}**" for i, r in enumerate(rows, 1)]
+    await ctx.send(embed=embed("Invite Leaderboard", "\n".join(lines) or "No invite data."))
 
-    e = embed("INVITE LEADERBOARD")
-    e.description = "\n".join(
-        f"**{i}.** <@{r['inviter_id']}> — {r['total']}"
-        for i, r in enumerate(rows, 1)
-    ) or "No invites tracked."
+# ================= REACTION ROLES =================
 
-    await ctx.send(embed=e)
-
-
-# ==========================================
-# REACTION ROLES
-# ==========================================
-
-db.executescript("""
-CREATE TABLE IF NOT EXISTS reaction_roles (
-    message_id INTEGER,
-    emoji TEXT,
-    role_id INTEGER,
-    PRIMARY KEY (message_id,emoji)
-);
-""")
-db.commit()
-
-@bot.group(invoke_without_command=True)
+@bot.group(name="rr", invoke_without_command=True)
+@commands.has_permissions(manage_roles=True)
 async def rr(ctx):
-    await info(ctx, "Use `!rr add`, `!rr remove` or `!rr list`.")
+    await info(ctx, "`!rr add <message_id> <emoji> <role>`\n`!rr remove <message_id> <emoji>`\n`!rr list`")
 
 @rr.command(name="add")
 @commands.has_permissions(manage_roles=True)
 async def rr_add(ctx, message_id: int, emoji: str, role: discord.Role):
+    if role >= ctx.guild.me.top_role:
+        return await error(ctx, "My role must be higher than that role.")
     try:
         msg = await ctx.channel.fetch_message(message_id)
         await msg.add_reaction(emoji)
-    except (discord.HTTPException, discord.NotFound):
-        return await error(ctx, "Could not find message or add reaction.")
-
-    execute(
-        "INSERT OR REPLACE INTO reaction_roles VALUES (?,?,?)",
-        (message_id, emoji, role.id)
-    )
-    await success(ctx, f"Reaction role added for {role.mention}.")
+    except (discord.NotFound, discord.HTTPException):
+        return await error(ctx, "I couldn't access that message or reaction.")
+    sql("INSERT OR REPLACE INTO reaction_roles(message_id,emoji,role_id) VALUES(?,?,?)",
+        (message_id, emoji, role.id))
+    await success(ctx, "Reaction role added.")
 
 @rr.command(name="remove")
 @commands.has_permissions(manage_roles=True)
-async def rr_remove(ctx, message_id: int, emoji: str):
-    execute(
-        "DELETE FROM reaction_roles WHERE message_id=? AND emoji=?",
-        (message_id, emoji)
-    )
+async def rr_remove(ctx, message_id: int, *, emoji: str):
+    sql("DELETE FROM reaction_roles WHERE message_id=? AND emoji=?",
+        (message_id, emoji))
     await success(ctx, "Reaction role removed.")
+
+@rr.command(name="list")
+async def rr_list(ctx):
+    rows = many(
+        """SELECT reaction_roles.message_id,reaction_roles.emoji,reaction_roles.role_id
+        FROM reaction_roles"""
+    )
+    lines = [
+        f"Message `{r['message_id']}` • {r['emoji']} • <@&{r['role_id']}>"
+        for r in rows
+    ]
+    await ctx.send(embed=embed("Reaction Roles", "\n".join(lines) or "None configured."))
 
 @bot.listen("on_raw_reaction_add")
 async def reaction_role_add(payload):
-    if payload.member is None or payload.member.bot:
+    if payload.guild_id is None or payload.member is None or payload.member.bot:
         return
-
-    row = fetchone(
-        "SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
-        (payload.message_id, str(payload.emoji))
-    )
+    row = one("SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
+              (payload.message_id, str(payload.emoji)))
     if not row:
         return
-
     guild = bot.get_guild(payload.guild_id)
-    if not guild:
-        return
-
-    role = guild.get_role(row["role_id"])
-    member = guild.get_member(payload.user_id)
-
-    if role and member:
+    role = guild.get_role(row["role_id"]) if guild else None
+    if role:
         try:
-            await member.add_roles(role)
+            await payload.member.add_roles(role, reason="Reaction role")
         except discord.HTTPException:
             pass
 
 @bot.listen("on_raw_reaction_remove")
 async def reaction_role_remove(payload):
-    row = fetchone(
-        "SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
-        (payload.message_id, str(payload.emoji))
-    )
+    if payload.guild_id is None:
+        return
+    row = one("SELECT role_id FROM reaction_roles WHERE message_id=? AND emoji=?",
+              (payload.message_id, str(payload.emoji)))
     if not row:
         return
-
     guild = bot.get_guild(payload.guild_id)
-    if not guild:
-        return
-
-    role = guild.get_role(row["role_id"])
-    member = guild.get_member(payload.user_id)
-
-    if role and member and not member.bot:
+    member = guild.get_member(payload.user_id) if guild else None
+    role = guild.get_role(row["role_id"]) if guild else None
+    if member and role:
         try:
-            await member.remove_roles(role)
+            await member.remove_roles(role, reason="Reaction role removed")
         except discord.HTTPException:
             pass
 
-
-# ==========================================
-# TICKETS
-# ==========================================
-
-db.executescript("""
-CREATE TABLE IF NOT EXISTS tickets (
-    channel_id INTEGER PRIMARY KEY,
-    guild_id INTEGER,
-    user_id INTEGER,
-    claimed_by INTEGER
-);
-CREATE TABLE IF NOT EXISTS server_settings (
-    guild_id INTEGER PRIMARY KEY,
-    ticket_category INTEGER
-);
-""")
-db.commit()
+# ================= TICKETS =================
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def ticketsetup(ctx, category: discord.CategoryChannel):
-    execute(
-        "INSERT OR REPLACE INTO server_settings VALUES (?,?)",
-        (ctx.guild.id, category.id)
-    )
-    await success(ctx, f"Ticket category set to {category.name}.")
+    set_setting(ctx.guild.id, "ticket_category", category.id)
+    await success(ctx, f"Ticket category set to **{category.name}**.")
 
 @bot.command()
 async def ticket(ctx):
-    row = fetchone(
-        "SELECT ticket_category FROM server_settings WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-    if not row:
-        return await error(ctx, "Tickets are not configured.")
+    category_id = get_setting(ctx.guild.id, "ticket_category")
+    if not category_id:
+        return await error(ctx, "Tickets have not been configured.")
+    category = ctx.guild.get_channel(int(category_id))
+    if not category:
+        return await error(ctx, "Ticket category no longer exists.")
 
-    category = ctx.guild.get_channel(row["ticket_category"])
-    if not isinstance(category, discord.CategoryChannel):
-        return await error(ctx, "Ticket category not found.")
-
-    existing = fetchone(
-        "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=?",
-        (ctx.guild.id, ctx.author.id)
-    )
-    if existing:
-        channel = ctx.guild.get_channel(existing["channel_id"])
-        if channel:
-            return await error(ctx, f"You already have {channel.mention}.")
+    existing = one("SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=?",
+                   (ctx.guild.id, ctx.author.id))
+    if existing and ctx.guild.get_channel(existing["channel_id"]):
+        return await error(ctx, "You already have an open ticket.")
 
     overwrites = {
         ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        ctx.author: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True
-        ),
-        ctx.guild.me: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            manage_channels=True
-        )
+        ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        ctx.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
     }
-
-    for role in ctx.guild.roles:
-        if role.permissions.manage_channels:
-            overwrites[role] = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True
-            )
-
     channel = await ctx.guild.create_text_channel(
-        f"ticket-{ctx.author.name}",
+        f"ticket-{ctx.author.name}".lower()[:90],
         category=category,
         overwrites=overwrites
     )
-
-    execute(
-        "INSERT INTO tickets VALUES (?,?,?,NULL)",
-        (channel.id, ctx.guild.id, ctx.author.id)
-    )
-
-    await channel.send(
-        embed=embed("SUPPORT TICKET", f"{ctx.author.mention}, describe your issue.\nUse `!claim` or `!close`.")
-    )
+    sql("INSERT OR REPLACE INTO tickets(channel_id,guild_id,user_id,claimed_by) VALUES(?,?,?,0)",
+        (channel.id, ctx.guild.id, ctx.author.id))
+    await channel.send(embed=embed("Support Ticket", f"{ctx.author.mention}, explain your issue here."))
     await success(ctx, f"Ticket created: {channel.mention}")
 
 @bot.command()
 @commands.has_permissions(manage_channels=True)
 async def claim(ctx):
-    row = fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
+    row = one("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
     if not row:
-        return await error(ctx, "This is not a ticket.")
-
-    execute(
-        "UPDATE tickets SET claimed_by=? WHERE channel_id=?",
-        (ctx.author.id, ctx.channel.id)
-    )
+        return await error(ctx, "This is not a ticket channel.")
+    sql("UPDATE tickets SET claimed_by=? WHERE channel_id=?",
+        (ctx.author.id, ctx.channel.id))
     await success(ctx, f"Ticket claimed by {ctx.author.mention}.")
 
 @bot.command()
+@commands.has_permissions(manage_channels=True)
 async def close(ctx):
-    row = fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
+    row = one("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
     if not row:
-        return await error(ctx, "This is not a ticket.")
-
-    if ctx.author.id != row["user_id"] and not ctx.author.guild_permissions.manage_channels:
-        return await error(ctx, "You cannot close this ticket.")
-
-    execute("DELETE FROM tickets WHERE channel_id=?", (ctx.channel.id,))
+        return await error(ctx, "This is not a ticket channel.")
     await success(ctx, "Ticket closing in 3 seconds.")
     await asyncio.sleep(3)
-    await ctx.channel.delete()
+    sql("DELETE FROM tickets WHERE channel_id=?", (ctx.channel.id,))
+    await ctx.channel.delete(reason=f"Ticket closed by {ctx.author}")
 
+# ================= SNIPE =================
 
-# ==========================================
-# SNIPER
-# ==========================================
+snipes = {}
 
-db.executescript("""
-CREATE TABLE IF NOT EXISTS snipes (
-    channel_id INTEGER PRIMARY KEY,
-    author_id INTEGER,
-    content TEXT,
-    deleted_at INTEGER
-);
-""")
-db.commit()
-
-@bot.event
-async def on_message_delete(message):
+@bot.listen("on_message_delete")
+async def snipe_listener(message):
     if message.guild and not message.author.bot and message.content:
-        execute(
-            "INSERT OR REPLACE INTO snipes VALUES (?,?,?,?)",
-            (message.channel.id, message.author.id, message.content, int(time.time()))
-        )
+        snipes[message.channel.id] = {
+            "author": str(message.author),
+            "content": message.content[:1500]
+        }
 
-@bot.command(name="s")
+@bot.command(name="s", aliases=["snipe"])
 async def snipe(ctx):
-    row = fetchone("SELECT * FROM snipes WHERE channel_id=?", (ctx.channel.id,))
-    if not row:
+    data = snipes.get(ctx.channel.id)
+    if not data:
         return await info(ctx, "Nothing to snipe.")
+    await ctx.send(embed=embed(f"Deleted by {data['author']}", data["content"]))
 
-    await ctx.send(
-        embed=embed(
-            "LAST DELETED MESSAGE",
-            f"Author: <@{row['author_id']}>\nMessage: {row['content']}"
-        )
-    )
-
-@bot.command()
-async def cs(ctx):
-    execute("DELETE FROM snipes WHERE channel_id=?", (ctx.channel.id,))
+@bot.command(name="cs", aliases=["clearsnipe"])
+async def clearsnipe(ctx):
+    snipes.pop(ctx.channel.id, None)
     await success(ctx, "Snipe cleared.")
 
+# ================= GIVEAWAYS =================
 
-# ==========================================
-# ANNOUNCEMENTS
-# ==========================================
+giveaway_tasks = {}
 
-pending_announcement = {}
+async def finish_giveaway(message_id):
+    row = one("SELECT * FROM giveaways WHERE message_id=? AND ended=0",
+              (message_id,))
+    if not row:
+        return
 
-@bot.command()
-@owner_only()
-async def announce(ctx, *, message):
-    pending_announcement[ctx.author.id] = message
+    channel = bot.get_channel(row["channel_id"])
+    if not channel:
+        return
 
-    await ctx.send(
-        embed=embed(
-            "ANNOUNCEMENT PREVIEW",
-            message + "\n\nUse `!announceconfirm` to send or `!announcecancel` to cancel."
-        )
-    )
+    try:
+        msg = await channel.fetch_message(message_id)
+        users = []
+        reaction = discord.utils.get(msg.reactions, emoji="🎉")
+        if reaction:
+            async for user in reaction.users():
+                if not user.bot:
+                    users.append(user)
 
-@bot.command()
-@owner_only()
-async def announceconfirm(ctx):
-    message = pending_announcement.pop(ctx.author.id, None)
-    if not message:
-        return await error(ctx, "No pending announcement.")
+        if users:
+            winner = random.choice(users)
+            await channel.send(embed=embed(
+                "🎉 Giveaway Winner!",
+                f"Prize: **{row['prize']}**\nWinner: {winner.mention}"
+            ))
+        else:
+            await channel.send(embed=embed("Giveaway Ended", "No valid entries."))
+    except discord.HTTPException:
+        pass
 
-    sent = 0
-    for guild in bot.guilds:
-        channel = guild.system_channel
+    sql("UPDATE giveaways SET ended=1 WHERE message_id=?", (message_id,))
+    giveaway_tasks.pop(message_id, None)
 
-        if not channel:
-            channel = next(
-                (
-                    c for c in guild.text_channels
-                    if c.permissions_for(guild.me).send_messages
-                ),
-                None
+async def giveaway_timer(message_id, end_time):
+    await asyncio.sleep(max(0, end_time - int(time.time())))
+    await finish_giveaway(message_id)
+
+async def restore_giveaways():
+    for row in many("SELECT message_id,end_time FROM giveaways WHERE ended=0"):
+        if row["message_id"] not in giveaway_tasks:
+            giveaway_tasks[row["message_id"]] = asyncio.create_task(
+                giveaway_timer(row["message_id"], row["end_time"])
             )
-
-        if channel:
-            try:
-                await channel.send(
-                    embed=embed("VEXORA ANNOUNCEMENT", message),
-                    allowed_mentions=discord.AllowedMentions.none()
-                )
-                sent += 1
-            except discord.HTTPException:
-                pass
-
-    await success(ctx, f"Announcement sent to {sent} servers.")
-
-@bot.command()
-@owner_only()
-async def announcecancel(ctx):
-    pending_announcement.pop(ctx.author.id, None)
-    await success(ctx, "Announcement cancelled.")
-
-
-# ==========================================
-# FIRST TO REACT
-# ==========================================
-
-ftr_games = {}
 
 @bot.command()
 @commands.has_permissions(manage_guild=True)
-async def ftr(ctx, action="start", seconds: int = 15):
-    action = action.lower()
+async def gstart(ctx, seconds: int, *, prize):
+    if seconds < 10 or seconds > 2592000:
+        return await error(ctx, "Duration must be between 10 seconds and 30 days.")
+    end_time = int(time.time()) + seconds
+    msg = await ctx.send(embed=embed(
+        "🎉 Giveaway!",
+        f"Prize: **{prize}**\nReact with 🎉 to enter!\nEnds <t:{end_time}:R>"
+    ))
+    await msg.add_reaction("🎉")
+    sql("INSERT INTO giveaways(message_id,guild_id,channel_id,prize,end_time,ended) VALUES(?,?,?,?,?,0)",
+        (msg.id, ctx.guild.id, ctx.channel.id, prize, end_time))
+    giveaway_tasks[msg.id] = asyncio.create_task(giveaway_timer(msg.id, end_time))
+    await success(ctx, "Giveaway started.")
 
-    if action == "start":
-        if ctx.channel.id in ftr_games:
-            return await error(ctx, "A game is already running.")
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def gend(ctx, message_id: int):
+    await finish_giveaway(message_id)
+    await success(ctx, "Giveaway ended if it was active.")
 
-        if seconds < 5 or seconds > 120:
-            return await error(ctx, "Choose 5–120 seconds.")
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def gcancel(ctx, message_id: int):
+    task = giveaway_tasks.pop(message_id, None)
+    if task:
+        task.cancel()
+    sql("UPDATE giveaways SET ended=1 WHERE message_id=? AND guild_id=?",
+        (message_id, ctx.guild.id))
+    await success(ctx, "Giveaway cancelled.")
 
-        msg = await ctx.send(
-            embed=embed("FIRST TO REACT", f"React with ⚡ first!\nTime: {seconds} seconds.")
-        )
-        await msg.add_reaction("⚡")
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def greroll(ctx, message_id: int):
+    row = one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?",
+              (message_id, ctx.guild.id))
+    if not row:
+        return await error(ctx, "Giveaway not found.")
+    channel = bot.get_channel(row["channel_id"])
+    try:
+        msg = await channel.fetch_message(message_id)
+        reaction = discord.utils.get(msg.reactions, emoji="🎉")
+        users = []
+        if reaction:
+            async for user in reaction.users():
+                if not user.bot:
+                    users.append(user)
+        if not users:
+            return await error(ctx, "No valid entrants.")
+        await ctx.send(embed=embed("🎉 New Winner", random.choice(users).mention))
+    except discord.HTTPException:
+        await error(ctx, "Couldn't access that giveaway.")
 
-        ftr_games[ctx.channel.id] = {
-            "message_id": msg.id,
-            "winner": None
-        }
+# ================= FTR =================
 
+ftr_games = {}
+
+@bot.group(invoke_without_command=True)
+async def ftr(ctx):
+    await info(ctx, "`!ftr start <seconds>`\n`!ftr stop`\n`!ftr winner`\n`!ftr leaderboard`")
+
+@ftr.command(name="start")
+@commands.has_permissions(manage_guild=True)
+async def ftr_start(ctx, seconds: int = 30):
+    if seconds < 5 or seconds > 300:
+        return await error(ctx, "Choose 5 to 300 seconds.")
+    if ctx.channel.id in ftr_games:
+        return await error(ctx, "A game is already running here.")
+    end = int(time.time()) + seconds
+    msg = await ctx.send(embed=embed(
+        "⚡ First To React",
+        f"React with ⚡ first!\nEnds <t:{end}:R>"
+    ))
+    await msg.add_reaction("⚡")
+    ftr_games[ctx.channel.id] = {
+        "message": msg.id,
+        "winner": None,
+        "task": None
+    }
+
+    async def finish():
         await asyncio.sleep(seconds)
-
         game = ftr_games.get(ctx.channel.id)
-        if game:
-            winner = game["winner"]
-            if winner:
-                execute(
-                    "INSERT OR IGNORE INTO ftr_scores VALUES (?,?,0)",
-                    (ctx.guild.id, winner)
-                )
-                execute(
-                    "UPDATE ftr_scores SET wins=wins+1 WHERE guild_id=? AND user_id=?",
-                    (ctx.guild.id, winner)
-                )
-                await ctx.send(embed=embed("FTR WINNER", f"<@{winner}> won!"))
-            else:
-                await ctx.send(embed=embed("FTR ENDED", "Nobody reacted in time."))
-            ftr_games.pop(ctx.channel.id, None)
-
-    elif action == "stop":
+        if not game:
+            return
+        winner = game["winner"]
+        if winner:
+            await ctx.send(embed=embed("FTR Winner", winner.mention))
+        else:
+            await ctx.send(embed=embed("FTR Ended", "Nobody reacted first."))
         ftr_games.pop(ctx.channel.id, None)
-        await success(ctx, "FTR stopped.")
 
-    else:
-        await error(ctx, "Use `!ftr start` or `!ftr stop`.")
+    ftr_games[ctx.channel.id]["task"] = asyncio.create_task(finish())
+
+@ftr.command(name="stop")
+@commands.has_permissions(manage_guild=True)
+async def ftr_stop(ctx):
+    game = ftr_games.pop(ctx.channel.id, None)
+    if not game:
+        return await error(ctx, "No active game.")
+    game["task"].cancel()
+    await success(ctx, "FTR stopped.")
+
+@ftr.command(name="winner")
+async def ftr_winner(ctx):
+    game = ftr_games.get(ctx.channel.id)
+    if not game:
+        return await error(ctx, "No active game.")
+    await info(ctx, f"Winner: {game['winner'].mention if game['winner'] else 'Not decided yet.'}")
+
+@ftr.command(name="leaderboard")
+async def ftr_leaderboard(ctx):
+    await info(ctx, "FTR leaderboard is not available yet.")
 
 @bot.listen("on_raw_reaction_add")
 async def ftr_reaction(payload):
-    if str(payload.emoji) != "⚡" or payload.member is None or payload.member.bot:
+    if str(payload.emoji) != "⚡" or payload.user_id == bot.user.id:
         return
-
     game = ftr_games.get(payload.channel_id)
-    if game and payload.message_id == game["message_id"] and not game["winner"]:
-        game["winner"] = payload.user_id
+    if not game or game["message"] != payload.message_id:
+        return
+    if game["winner"] is None:
+        guild = bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id) if guild else None
+        if member and not member.bot:
+            game["winner"] = member
 
-
-# ==========================================
-# BOT STATUS
-# ==========================================
+# ================= BOT STATUS =================
 
 @bot.command()
 @owner_only()
 async def playing(ctx, *, text):
     await bot.change_presence(
-        activity=discord.Game(name=text)
+        activity=discord.Game(name=text),
+        status=discord.Status.online
     )
-    await success(ctx, f"Playing status changed to: {text}")
+    await success(ctx, f"Playing status set to **{text}**.")
 
 @bot.command()
 @owner_only()
 async def stext(ctx, *, text):
     await bot.change_presence(
-        activity=discord.CustomActivity(name=text)
+        activity=discord.CustomActivity(name=text),
+        status=discord.Status.online
     )
-    await success(ctx, f"Custom status changed to: {text}")
+    await success(ctx, f"Custom status set to **{text}**.")
 
 @bot.command()
 @owner_only()
@@ -1568,255 +1257,122 @@ async def status(ctx, mode: str):
         "dnd": discord.Status.dnd,
         "sleep": discord.Status.idle
     }
-
     mode = mode.lower()
     if mode not in modes:
-        return await error(ctx, "Use online, offline, dnd or sleep.")
-
+        return await error(ctx, "Choose online, offline, dnd, or sleep.")
     await bot.change_presence(status=modes[mode])
-    await success(ctx, f"Status changed to {mode}.")
+    await success(ctx, f"Status changed to **{mode}**.")
 
+# ================= GLOBAL ANNOUNCEMENTS =================
 
-# ==========================================
-# PREMIUM CUSTOM COMMANDS
-# ==========================================
-
-db.executescript("""
-CREATE TABLE IF NOT EXISTS custom_commands (
-    guild_id INTEGER,
-    name TEXT,
-    response TEXT,
-    created_by INTEGER,
-    PRIMARY KEY (guild_id,name)
-);
-""")
-db.commit()
-
-@bot.group(invoke_without_command=True)
-async def cc(ctx):
-    await info(ctx, "Use `!cc add`, `!cc edit`, `!cc remove`, `!cc list` or `!cc info`.")
-
-@cc.command(name="add")
-@commands.has_permissions(manage_guild=True)
-async def cc_add(ctx, name: str, *, response: str):
-    if not await is_premium(ctx.guild.id):
-        return await error(ctx, "Custom commands require server premium.")
-
-    name = name.lower()
-
-    if not re.fullmatch(r"[a-z0-9_-]{2,32}", name):
-        return await error(ctx, "Use 2–32 letters, numbers, _ or -.")
-
-    if bot.get_command(name):
-        return await error(ctx, "That name is already a built-in command.")
-
-    execute(
-        "INSERT OR REPLACE INTO custom_commands VALUES (?,?,?,?)",
-        (ctx.guild.id, name, response, ctx.author.id)
-    )
-    await success(ctx, f"Custom command `{name}` created.")
-
-@cc.command(name="edit")
-@commands.has_permissions(manage_guild=True)
-async def cc_edit(ctx, name: str, *, response: str):
-    if not await is_premium(ctx.guild.id):
-        return await error(ctx, "Server premium required.")
-
-    row = fetchone(
-        "SELECT name FROM custom_commands WHERE guild_id=? AND name=?",
-        (ctx.guild.id, name.lower())
-    )
-    if not row:
-        return await error(ctx, "Custom command not found.")
-
-    execute(
-        "UPDATE custom_commands SET response=? WHERE guild_id=? AND name=?",
-        (response, ctx.guild.id, name.lower())
-    )
-    await success(ctx, f"Updated `{name}`.")
-
-@cc.command(name="remove")
-@commands.has_permissions(manage_guild=True)
-async def cc_remove(ctx, name: str):
-    execute(
-        "DELETE FROM custom_commands WHERE guild_id=? AND name=?",
-        (ctx.guild.id, name.lower())
-    )
-    await success(ctx, f"Removed `{name}`.")
-
-@cc.command(name="list")
-async def cc_list(ctx):
-    rows = fetchall(
-        "SELECT name FROM custom_commands WHERE guild_id=?",
-        (ctx.guild.id,)
-    )
-    e = embed("CUSTOM COMMANDS")
-    e.description = "\n".join(f"`{r['name']}`" for r in rows) or "No custom commands."
-    await ctx.send(embed=e)
-
-@cc.command(name="info")
-async def cc_info(ctx, name: str):
-    row = fetchone(
-        "SELECT response,created_by FROM custom_commands WHERE guild_id=? AND name=?",
-        (ctx.guild.id, name.lower())
-    )
-    if not row:
-        return await error(ctx, "Custom command not found.")
-
-    await ctx.send(
-        embed=embed(
-            f"CUSTOM COMMAND: {name}",
-            f"Response: {row['response']}\nCreated by: <@{row['created_by']}>"
-        )
-    )
-
-@bot.listen("on_message")
-async def custom_command_listener(message):
-    if message.author.bot or not message.guild:
-        return
-
-    prefix = next(
-        (p for p in PREFIXES if message.content.startswith(p)),
-        None
-    )
-    if not prefix:
-        return
-
-    name = message.content[len(prefix):].split(" ", 1)[0].lower()
-
-    if not name or bot.get_command(name):
-        return
-
-    if not await is_premium(message.guild.id):
-        return
-
-    row = fetchone(
-        "SELECT response FROM custom_commands WHERE guild_id=? AND name=?",
-        (message.guild.id, name)
-    )
-    if row:
-        await message.channel.send(
-            row["response"],
-            allowed_mentions=discord.AllowedMentions.none()
-        )
-
-
-# ==========================================
-# DYNAMIC HELP COMMAND
-# ==========================================
+announcement_pending = {}
 
 @bot.command()
-async def help(ctx, command_name: str = None):
-    if command_name:
-        command = bot.get_command(command_name)
-        if not command:
-            return await error(ctx, "Command not found.")
+@owner_only()
+async def announce(ctx, *, message):
+    announcement_pending[ctx.author.id] = message
+    await ctx.send(embed=embed(
+        "Confirm Global Announcement",
+        f"{message}\n\nType `!announceconfirm` to send or `!announcecancel` to cancel."
+    ))
 
-        e = embed(
-            f"HELP: {command.qualified_name}",
-            command.help or "No description available."
-        )
-
-        if isinstance(command, commands.Group):
-            e.add_field(
-                name="Subcommands",
-                value=", ".join(c.name for c in command.commands) or "None",
-                inline=False
+@bot.command()
+@owner_only()
+async def announceconfirm(ctx):
+    message = announcement_pending.pop(ctx.author.id, None)
+    if not message:
+        return await error(ctx, "No pending announcement.")
+    sent = 0
+    for guild in bot.guilds:
+        channel = guild.system_channel
+        if channel is None or not channel.permissions_for(guild.me).send_messages:
+            channel = next(
+                (c for c in guild.text_channels
+                 if c.permissions_for(guild.me).send_messages),
+                None
             )
+        if channel:
+            try:
+                await channel.send(embed=embed("VEXORA Announcement", message))
+                sent += 1
+            except discord.HTTPException:
+                pass
+    await success(ctx, f"Announcement sent to `{sent}` servers.")
 
-        return await ctx.send(embed=e)
+@bot.command()
+@owner_only()
+async def announcecancel(ctx):
+    announcement_pending.pop(ctx.author.id, None)
+    await success(ctx, "Announcement cancelled.")
 
-    categories = {
-        "General": [],
-        "Moderation": [],
-        "Economy & Games": [],
-        "Community": [],
-        "Fun": [],
-        "Server Tools": [],
-        "Premium": [],
-        "Owner": []
-    }
+# ================= HELP =================
 
-    category_map = {
-        "ping": "General", "botinfo": "General",
-        "serverinfo": "General", "userinfo": "General",
-        "avatar": "General", "support": "General",
+CATEGORY_MAP = {
+    "General": ["ping", "botinfo", "serverinfo", "userinfo", "avatar", "support"],
+    "Moderation": ["ban", "kick", "unban", "timeout", "untimeout", "purge", "lock", "unlock", "slowmode"],
+    "Warnings": ["warn", "warnings", "clearwarns", "staff"],
+    "Economy": ["balance", "daily", "weekly", "work", "beg", "pay", "leaderboard"],
+    "Games": ["dice", "flip", "rps", "guess", "trivia"],
+    "Reputation": ["rep", "reps", "repboard"],
+    "Levels": ["rank", "level", "levels"],
+    "Invites": ["invites", "inviter", "inviteinfo", "topinvites"],
+    "Community": ["afk", "confesssetup", "confess", "confessionsoff", "suggestsetup", "suggest", "poll"],
+    "Fun": ["kiss", "punch", "kick"],
+    "Tickets": ["ticketsetup", "ticket", "claim", "close"],
+    "Giveaways": ["gstart", "gend", "gcancel", "greroll"],
+    "FTR": ["ftr"],
+    "Premium": ["premium", "cc"],
+    "Owner": ["playing", "stext", "status", "announce", "announceconfirm", "announcecancel"]
+}
 
-        "ban": "Moderation", "unban": "Moderation",
-        "modkick": "Moderation", "timeout": "Moderation",
-        "untimeout": "Moderation", "purge": "Moderation",
-        "lock": "Moderation", "unlock": "Moderation",
-        "slowmode": "Moderation", "warn": "Moderation",
-        "warnings": "Moderation", "clearwarns": "Moderation",
-        "staff": "Moderation",
+@bot.command(name="help", aliases=["commands"])
+async def help_command(ctx, *, category=None):
+    if category:
+        key = next((k for k in CATEGORY_MAP if k.lower() == category.lower()), None)
+        if not key:
+            return await error(ctx, "Category not found.")
+        names = CATEGORY_MAP[key]
+        lines = []
+        for name in names:
+            command = bot.get_command(name)
+            if command:
+                lines.append(f"`{name}` — {command.short_doc or 'VEXORA command'}")
+        return await ctx.send(embed=embed(key, "\n".join(lines) or "No commands."))
 
-        "balance": "Economy & Games", "daily": "Economy & Games",
-        "weekly": "Economy & Games", "work": "Economy & Games",
-        "beg": "Economy & Games", "pay": "Economy & Games",
-        "leaderboard": "Economy & Games", "dice": "Economy & Games",
-        "flip": "Economy & Games", "rps": "Economy & Games",
-
-        "afk": "Community", "confess": "Community",
-        "confesssetup": "Community", "confessionsoff": "Community",
-        "suggest": "Community", "suggestsetup": "Community",
-        "poll": "Community", "rep": "Community",
-        "reps": "Community", "rank": "Community",
-        "level": "Community",
-
-        "kiss": "Fun", "punch": "Fun", "kick": "Fun",
-
-        "gstart": "Server Tools", "gend": "Server Tools",
-        "gcancel": "Server Tools", "greroll": "Server Tools",
-        "invites": "Server Tools", "inviter": "Server Tools",
-        "topinvites": "Server Tools", "rr": "Server Tools",
-        "ticket": "Server Tools", "ticketsetup": "Server Tools",
-        "claim": "Server Tools", "close": "Server Tools",
-        "s": "Server Tools", "cs": "Server Tools",
-        "ftr": "Server Tools",
-
-        "premium": "Premium", "cc": "Premium",
-
-        "announce": "Owner", "announceconfirm": "Owner",
-        "announcecancel": "Owner", "playing": "Owner",
-        "status": "Owner", "stext": "Owner"
-    }
-
-    for command in bot.commands:
-        if command.hidden:
-            continue
-
-        category = category_map.get(command.name, "General")
-        categories[category].append(command.name)
-
-    e = embed("VEXORA COMMANDS")
-
-    for category, names in categories.items():
-        if names:
-            e.add_field(
-                name=category,
-                value=", ".join(f"`{n}`" for n in sorted(set(names))),
-                inline=False
-            )
-
-    e.add_field(
-        name="Prefixes",
-        value="`!` `?` `.` `$` `-`",
-        inline=False
-    )
-    e.add_field(
-        name="Support",
-        value=f"[Join here]({SUPPORT_SERVER})",
-        inline=False
-    )
-
+    e = embed("VEXORA Commands", "Prefixes: `!` `?` `.` `$` `-`\nUse `!help <category>` for details.")
+    for category, names in CATEGORY_MAP.items():
+        available = [n for n in names if bot.get_command(n)]
+        e.add_field(name=category, value=", ".join(f"`{n}`" for n in available) or "None", inline=False)
     await ctx.send(embed=e)
 
+# ================= ERROR HANDLING =================
 
-# ==========================================
-# FINAL STARTUP
-# ==========================================
+@bot.event
+async def on_command_error(ctx, err):
+    if isinstance(err, commands.CommandNotFound):
+        return
+    if isinstance(err, commands.MissingRequiredArgument):
+        return await error(ctx, f"Missing argument: `{err.param.name}`.")
+    if isinstance(err, commands.BadArgument):
+        return await error(ctx, "Invalid argument. Check the command format.")
+    if isinstance(err, commands.MissingPermissions):
+        return await error(ctx, "You don't have permission to use this command.")
+    if isinstance(err, commands.BotMissingPermissions):
+        return await error(ctx, "I don't have the required permissions.")
+    if isinstance(err, commands.CommandOnCooldown):
+        return await error(ctx, f"Try again in `{round(err.retry_after)}` seconds.")
+    if isinstance(err, commands.CheckFailure):
+        return await error(ctx, "You are not allowed to use this command.")
+    if isinstance(err, discord.Forbidden):
+        return await error(ctx, "Discord denied that action. Check my permissions and role position.")
+    if isinstance(err, discord.NotFound):
+        return await error(ctx, "That Discord item could not be found.")
+    print(f"Command error in {ctx.command}: {repr(err)}")
+    await error(ctx, "Something went wrong. Check Railway logs for the full error.")
+
+# ================= START =================
 
 if not TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing!")
+    raise RuntimeError("BOT_TOKEN is missing from Railway Variables.")
 
 bot.run(TOKEN)
